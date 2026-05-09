@@ -1,0 +1,72 @@
+{
+  "_doc": "Regulatory fees per market. Distinct from broker commission and from transaction taxes (see tax_rules.json). Many of these are bundled into IBKR's `commissionReport.commission` field for retail accounts; the calculator can choose to either treat the broker commission as all-inclusive or to add these on top depending on the account profile. SEC and FINRA TAF rates change annually — refresh from official schedules.",
+  "_as_of": "2026-05-04",
+  "US_STK": {
+    "currency": "USD",
+    "sells_only": {
+      "sec_fee_per_million": 27.80,
+      "sec_fee_doc": "SEC Section 31 fee. Rate set annually by SEC; $27.80 per $1M of notional sold (i.e. 0.278 bps). Buyers exempt.",
+      "finra_taf_per_share": 0.000166,
+      "finra_taf_max_per_trade": 8.30,
+      "finra_taf_doc": "FINRA Trading Activity Fee. $0.000166/share on covered sells, capped at $8.30 per trade."
+    },
+    "buys_only": {},
+    "both_sides": {}
+  },
+  "US_ETF": {
+    "currency": "USD",
+    "_inherits": "US_STK",
+    "notes": "Same SEC + FINRA TAF as common stock."
+  },
+  "US_SMALL_CAP_STK": {
+    "currency": "USD",
+    "_inherits": "US_STK"
+  },
+  "FUT_CME": {
+    "currency": "USD",
+    "both_sides": {
+      "nfa_fee_per_contract": 0.02,
+      "nfa_doc": "NFA assessment fee per side. Tiny (rounding-error level).",
+      "exchange_fee_doc": "CME exchange fee already in broker_ibkr.json under exchange_fee_per_contract; do NOT double-count."
+    }
+  },
+  "FUT_CFE": {
+    "currency": "USD",
+    "_inherits": "FUT_CME",
+    "notes": "CFE NFA + exchange fee model is identical in shape."
+  },
+  "FUT_NYBOT": {
+    "currency": "USD",
+    "_inherits": "FUT_CME"
+  },
+  "FX_IDEALPRO": {
+    "currency": "USD",
+    "buys_only": {},
+    "sells_only": {},
+    "both_sides": {},
+    "notes": "Spot FX has no SEC/FINRA fees. Some venues levy a small assessment but it's bundled into IBKR commission for retail."
+  },
+  "CFD_FX": {
+    "currency": "USD",
+    "_inherits": "FX_IDEALPRO"
+  },
+  "EU_STK_XETRA": {
+    "currency": "EUR",
+    "both_sides": {
+      "clearing_fee_per_trade": 0.10,
+      "clearing_doc": "Eurex Clearing per-execution fee. Often bundled into IBKR commission."
+    }
+  },
+  "EU_STK_LSE": {
+    "currency": "GBP",
+    "buys_only": {
+      "ptm_levy_per_trade": 1.00,
+      "ptm_doc": "Panel on Takeovers & Mergers levy: £1.00 on UK equity trades >= £10,000 notional, on the buy side."
+    },
+    "both_sides": {}
+  },
+  "EU_STK_SIX": {
+    "currency": "CHF",
+    "both_sides": {}
+  }
+}

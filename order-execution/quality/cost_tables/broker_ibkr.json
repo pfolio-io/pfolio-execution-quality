@@ -1,0 +1,96 @@
+{
+  "_doc": "IBKR Pro tiered commission schedule. Each rule has a key matching the cost_model.py classification (asset_class, market). Values denominated in `currency`. Refresh from https://www.interactivebrokers.com/en/pricing/commissions-home.php when the schedule changes.",
+  "_as_of": "2026-05-04",
+  "_pricing_tier": "IBKR Pro Tiered",
+  "US_STK": {
+    "currency": "USD",
+    "per_share": 0.0035,
+    "min_per_order": 0.35,
+    "max_pct_of_notional": 0.01,
+    "notes": "Tiered for monthly volume <300k shares; lower rates above. Pro tier; IBKR Lite is $0 commission but worse fills."
+  },
+  "US_ETF": {
+    "currency": "USD",
+    "per_share": 0.0035,
+    "min_per_order": 0.35,
+    "max_pct_of_notional": 0.01,
+    "notes": "Same schedule as US_STK on Pro tiered. Some ETFs are commission-free under IBKR Lite or specific programmes."
+  },
+  "US_SMALL_CAP_STK": {
+    "currency": "USD",
+    "per_share": 0.0035,
+    "min_per_order": 0.35,
+    "max_pct_of_notional": 0.01,
+    "notes": "Same Pro tiered schedule as US_STK. Separate key only so the calculator can apply small-cap-specific spread medians from the harness."
+  },
+  "EU_STK_XETRA": {
+    "currency": "EUR",
+    "per_value_bps": 5.0,
+    "min_per_order": 1.25,
+    "max_per_order": 99.0,
+    "notes": "XETRA (DE). Tiered: 5 bps with €1.25 min, capped at €99."
+  },
+  "EU_STK_LSE": {
+    "currency": "GBP",
+    "per_value_bps": 5.0,
+    "min_per_order": 1.0,
+    "max_pct_of_notional": 0.0149,
+    "notes": "LSE main market (UK). 5 bps with £1 min, capped at 1.49% of trade value."
+  },
+  "EU_STK_SIX": {
+    "currency": "CHF",
+    "per_value_bps": 6.0,
+    "min_per_order": 1.5,
+    "max_per_order": 99.0,
+    "notes": "SIX Swiss Exchange. 6 bps with CHF 1.50 min, capped at CHF 99."
+  },
+  "FX_IDEALPRO": {
+    "currency": "USD",
+    "per_value_bps": 0.20,
+    "min_per_order": 2.0,
+    "notes": "IDEALPRO spot FX. 0.20 bps of trade value with $2 minimum. Commission charged in account base currency."
+  },
+  "CFD_FX": {
+    "currency": "USD",
+    "per_value_bps": 0.20,
+    "min_per_order": 2.0,
+    "notes": "Mirrors IDEALPRO pricing for forex CFDs."
+  },
+  "CFD_INDEX": {
+    "currency": "USD",
+    "per_value_bps": 0.50,
+    "min_per_order": 1.0,
+    "notes": "Index CFDs. Schedule varies per region; check pricing page."
+  },
+  "FUT_CME": {
+    "currency": "USD",
+    "per_contract": 0.85,
+    "exchange_fee_per_contract": 1.40,
+    "notes": "ES/NQ/RTY (e-mini index). Exchange fee bundled into commissionReport. Total typically ~$2.25/side."
+  },
+  "FUT_CME_MICRO": {
+    "currency": "USD",
+    "per_contract": 0.25,
+    "exchange_fee_per_contract": 0.35,
+    "notes": "MES/MNQ/MGC (micro contracts). Roughly $0.60/side total."
+  },
+  "FUT_CFE": {
+    "currency": "USD",
+    "per_contract": 1.50,
+    "exchange_fee_per_contract": 0.85,
+    "notes": "VIX (VX) and VXM mini. Total ~$2.35/side."
+  },
+  "FUT_NYBOT": {
+    "currency": "USD",
+    "per_contract": 1.50,
+    "exchange_fee_per_contract": 0.72,
+    "notes": "ICE US futures: DX (USD index), KC (coffee), CC (cocoa), CT (cotton), SB (sugar). Total ~$2.22/side."
+  },
+  "FUT_EUREX": {
+    "currency": "EUR",
+    "per_contract": 1.0,
+    "exchange_fee_per_contract": 0.50,
+    "notes": "FESX (Euro Stoxx 50), FDAX (DAX), etc. Refresh per-product fee from EUREX schedule."
+  },
+  "FUT_GLOBEX_OVERNIGHT_DISCOUNT_PCT": 0.0
+}

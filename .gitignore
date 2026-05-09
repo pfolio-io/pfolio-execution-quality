@@ -1,0 +1,9 @@
+# Python bytecode cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/

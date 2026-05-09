@@ -1,0 +1,10 @@
+# Order-execution quality study + cost calculator — runtime dependencies.
+# Tested with the versions noted in parentheses; minimum floors are looser.
+
+ib_insync>=0.9.80          # IB API wrapper (tested 0.9.82)
+nest_asyncio>=1.5          # required by quality/runner.py for IB event loop
+pandas>=2.0                # used by calculator/harness_data.py and analyze.py
+
+# Optional — used by quality/results.py for parquet output.
+# Without it, the harness falls back to CSV.
+pyarrow>=10.0

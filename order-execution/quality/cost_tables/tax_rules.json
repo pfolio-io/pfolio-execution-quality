@@ -1,0 +1,67 @@
+{
+  "_doc": "Per-jurisdiction transaction taxes. Keyed by ISO country code of the *issuer's primary listing*, not the trading venue (UK FTT applies to LSE-listed UK companies even when traded on a foreign venue). Calculator looks up by `contract.currency` + `primaryExchange` heuristic, with manual overrides for edge cases. Rates current as of `_as_of`.",
+  "_as_of": "2026-05-04",
+  "US": {
+    "stk_tax": null,
+    "notes": "No transaction tax on US equities at federal level. SEC/FINRA fees are in reg_fees.json, not here."
+  },
+  "GB": {
+    "stk_tax": {
+      "rate_pct": 0.50,
+      "side": "BUY",
+      "min_notional": 1000.0,
+      "currency": "GBP",
+      "doc": "Stamp Duty Reserve Tax (SDRT). 0.5% on UK equity buys ≥ £1,000. AIM-listed shares exempt. Some intra-day market-maker exemptions exist."
+    },
+    "exempt_indices": [
+      "AIM"
+    ],
+    "notes": "Applies to LSE main-market UK companies. Foreign issuers traded on LSE depositary receipts may not be subject."
+  },
+  "FR": {
+    "stk_tax": {
+      "rate_pct": 0.30,
+      "side": "BUY",
+      "min_market_cap_eur": 1000000000,
+      "currency": "EUR",
+      "doc": "French FTT. 0.30% on buys of French companies with market cap > €1B (the official 'covered list' updated annually by Direction Générale des Finances Publiques)."
+    },
+    "covered_list_url": "https://www.impots.gouv.fr/portail/professionnel/taxe-sur-les-transactions-financieres"
+  },
+  "IT": {
+    "stk_tax": {
+      "rate_pct": 0.10,
+      "side": "BUY",
+      "min_market_cap_eur": 500000000,
+      "currency": "EUR",
+      "doc": "Italian FTT. 0.10% on buys of Italian companies with market cap > €500M, on regulated venues (0.20% OTC). Higher rates apply to derivatives."
+    }
+  },
+  "CH": {
+    "stk_tax": {
+      "rate_pct_domestic": 0.075,
+      "rate_pct_foreign": 0.15,
+      "side": "BOTH",
+      "currency": "CHF",
+      "doc": "Swiss federal stamp duty (Umsatzabgabe). 0.075% on Swiss-issued securities, 0.15% on foreign-issued securities, charged on BOTH legs (buy and sell). Levied by the broker if the broker is a Swiss securities dealer."
+    },
+    "broker_swiss_only": true,
+    "notes": "Only applies if at least one party to the trade is a Swiss securities dealer. IBKR Switzerland (IB Schweiz AG) does levy this on EU/US accounts holding Swiss-listed names."
+  },
+  "DE": {
+    "stk_tax": null,
+    "notes": "No active FTT as of 2026 (proposed legislation has been pending for years; not enacted)."
+  },
+  "BE": {
+    "stk_tax": {
+      "rate_pct": 0.35,
+      "side": "BOTH",
+      "currency": "EUR",
+      "doc": "Belgian taxe sur les opérations de bourse (TOB). 0.35% on Belgian-resident-investor trades. Rate varies by instrument (0.12% bonds, 1.32% accumulation funds)."
+    }
+  },
+  "NL": {
+    "stk_tax": null,
+    "notes": "No FTT. Watch for political changes — periodically proposed."
+  }
+}

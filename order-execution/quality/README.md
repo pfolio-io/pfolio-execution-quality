@@ -1,0 +1,252 @@
+# Order-execution quality harness
+
+A repeatable test harness that measures execution quality of four distinct
+order strategies across a curated set of IB instruments. Output: an empirical
+"optimal policy per instrument class" recommendation, backed by multi-run
+statistics and a Markdown report.
+
+## What it measures
+
+Each trial submits one strategy on one contract at tiny notional and records:
+
+- **Pre-trade**: `bid`, `ask`, `mid`, `spread_t0_bps`, `spread_t0_ticks`
+- **Fill**: `avg_fill_px`, `time_to_fill_s`, `status`, `n_fills`
+- **Post-fill**: `bid_tfill`, `ask_tfill`, `mid_tfill`
+- **Quality**: `slip_vs_mid_t0_bps` (primary), `slip_vs_vwap_bps`,
+  `slip_vs_mid_tfill_bps`, `vwap_window`
+
+Sign convention for slippage: `slip = side × (avg_fill_px − mid_t0) / mid_t0
+× 1e4` with `side = +1 for BUY, −1 for SELL`. **Positive = cost. Negative =
+price improvement.** Alternating BUY/SELL across runs cancels first-order
+drift bias.
+
+## The four strategies
+
+Each is built and submitted **directly** by the harness — bypassing
+production's spread-driven chain (TIGHT/WIDE/NO_QUOTE in
+`ib_order_executor.submit_order`) so no fallback contaminates the
+per-strategy measurement.
+
+| Label             | Construction                                | Eligibility                               |
+|-------------------|---------------------------------------------|-------------------------------------------|
+| `MIDPRICE_NATIVE` | IB native MIDPRICE algo                     | `MIDPRICE` in contract `orderTypes`       |
+| `LMT_MID`         | LimitOrder at live mid; up to 3×10s retries | live bid/ask available at T0              |
+| `MKT_ADAPTIVE`    | Adaptive algo, `adaptivePriority=Normal`    | `secType ∉ {CASH, CFD}` and MKT supported |
+| `MKT_RAW`         | Plain MarketOrder                           | universal                                 |
+
+Eligibility is checked per `(instrument × strategy)` at runtime; ineligible
+cells are recorded as `SKIPPED` (with `skip_reason`) rather than failed.
+
+## Instrument matrix
+
+| Tier | Symbols                                                    |
+|------|------------------------------------------------------------|
+| 1    | `AAPL`, `SPY`, `ES` (CME front), `EURUSD`                  |
+| 2    | `LQD`, `EFA`, `VIX` (CFE front), `CFD_USD_CHF`             |
+| 3    | `DX` (NYBOT front), `VIX_FAR` (CFE 2nd-month), `SMALL_CAP` |
+
+`SMALL_CAP` defaults to `PRIM` (Primoris Services). Swap
+`SMALL_CAP_SYMBOL` in `runner.py` if it delists or you want a different
+small-cap.
+
+Front/far-month resolution (`ES`, `VIX`, `VIX_FAR`, `DX`) goes via IB
+`reqContractDetailsAsync`, picking the n-th-earliest expiry ≥ today + 5
+calendar days. `VIX_FAR` uses `skip=1` to land on the second-front
+contract. No `investing_tools` dependency, so the package runs standalone.
+
+**Caveats**:
+
+- `VIX_FAR` may resolve very close to `VIX` front because CFE has weekly
+  VIX expiries. The skip is by sort order, not by-month, so the spacing
+  between front and far depends on which weeklies are listed.
+- `CFD_USD_CHF` requires CFD trading permissions on the IBKR account. If
+  not enabled, orders are rejected with Error 201 ("No Trading
+  Permission, Regulatory Restriction") and recorded in the `notes`
+  column with `status=TIMEOUT` (post-rejection cancel).
+- `DX` (NYBOT) tick-by-tick subscription is typically not granted with a
+  basic data package; the harness will fail-soft on VWAP and continue.
+
+## Layout
+
+```
+order-execution/
+  eligibility.py       # per-strategy eligibility checks (shared with production)
+  order_builders.py    # 4 isolated builders, each returns an Order (shared)
+  quote_snapshot.py    # Quote, snapshot_quote, slip_vs_mid_bps (shared)
+  quality/
+    __init__.py
+    runner.py          # entry point — sweeps (side × instrument × strategy)
+    instruments.py     # front-month resolution helper
+    metrics.py         # TickRecorder/VWAP (harness-only) + re-exports of the
+                       # shared shapes for backward-compatible imports
+    results.py         # parquet/csv append + canonical schema
+    analyze.py         # post-hoc aggregation → REPORT.md, --export-matrix-csv
+    results/           # gitignored except .gitkeep
+      trials_paper.parquet
+      trials_live.parquet
+      REPORT.md
+      matrix_{paper,live}.csv  # --export-matrix-csv output, calculator V1 input
+```
+
+## Running
+
+All commands assume CWD = `order-execution/`.
+
+```bash
+# Full Tier-1 sweep, BUY leg
+python -m quality.runner
+
+# Full Tier-1 + Tier-2, both BUY and SELL legs in one invocation
+python -m quality.runner --instruments all --side BUY SELL --outside-rth
+
+# Single instrument
+python -m quality.runner --instruments ES
+python -m quality.runner --instruments EURUSD --qty 20000
+
+# Subset of strategies
+python -m quality.runner --strategies LMT_MID MKT_RAW
+
+# Live mode (writes to trials_live.parquet; same TWS port)
+python -m quality.runner --mode live --instruments ES
+```
+
+After running, regenerate the report:
+
+```bash
+python -m quality.analyze              # paper store → REPORT.md
+python -m quality.analyze --mode live  # live store
+
+# Slice the report:
+python -m quality.analyze --last-run                       # only the most recent run
+python -m quality.analyze --run-id 20260504T133000          # one run (prefix match)
+python -m quality.analyze --since 2026-05-04T13:30          # ISO UTC cutoff
+python -m quality.analyze --last-run --report-path RTH.md   # write to a separate file
+```
+
+### CLI flags
+
+| Flag                | Default                    | Notes                                                                                                                |
+|---------------------|----------------------------|----------------------------------------------------------------------------------------------------------------------|
+| `--mode`            | `paper`                    | `paper` → `trials_paper.parquet`; `live` → `trials_live.parquet`                                                     |
+| `--side`            | `BUY`                      | One or more of `BUY` `SELL`. `BUY SELL` runs both legs                                                               |
+| `--instruments`     | `tier1`                    | Tier name (`tier1`, `tier2`, `tier3`, `all`) or comma list of symbols                                                |
+| `--strategies`      | all four                   | Subset of `MIDPRICE_NATIVE LMT_MID MKT_ADAPTIVE MKT_RAW`                                                             |
+| `--qty`             | per-symbol                 | Override; default uses `DEFAULT_QTY` (FX = 20000, others = 1)                                                        |
+| `--outside-rth`     | off                        | Allow pre/post-market fills for US equities                                                                          |
+| `--auto-flatten`    | live=on, paper=off         | After each FILLED entry leg, fire MKT_RAW exit at same qty so net exposure stays ~0. Both legs share `round_trip_id` |
+| `--no-auto-flatten` | —                          | Force-disable auto-flatten (positions accumulate)                                                                    |
+| `--yes-live`        | required for `--mode=live` | Confirms real orders will be placed against a live account                                                           |
+
+## Live mode
+
+`--mode live` writes to `trials_live.parquet` and is gated by three
+safeguards:
+
+1. **Pre-flight banner** prints the cell count and a rough max-commission
+   estimate before any orders fire.
+2. **`--yes-live` is required** — without it, the runner exits before
+   connecting to TWS.
+3. **Account-prefix gate** — refuses to start if the connected account
+   starts with `DU` (paper). Prevents paper fills from polluting the
+   live calibration dataset.
+
+Auto-flatten is **on by default** in live mode: after each FILLED entry
+leg, a `MKT_RAW` exit is fired at the same qty in the opposite direction
+so net exposure stays ~zero. Both legs share a `round_trip_id` for later
+round-trip cost computation.
+
+Live qty defaults differ from paper where the broker minimum is higher:
+
+| Symbol            | Paper qty | Live qty |
+|-------------------|-----------|----------|
+| EURUSD            | 20000     | 25000    |
+| CFD_USD_CHF       | 1000      | 25000    |
+| (everything else) | same      | same     |
+
+Override per-call with `--qty N`. Tier-1-only is the recommended live
+scope (per the original spec, Phase 6.5).
+
+## Per-strategy timeouts
+
+Defined in `runner.py`:
+
+| Strategy          | Timeout | Notes                                          |
+|-------------------|---------|------------------------------------------------|
+| `MIDPRICE_NATIVE` | 35s     | IB algo waits ~30s internally before giving up |
+| `LMT_MID`         | 3 × 10s | Re-snapshots mid each retry; ~30s budget       |
+| `MKT_ADAPTIVE`    | 30s     | Adaptive's price-improvement loop              |
+| `MKT_RAW`         | 10s     | Should fill instantly on liquid contracts      |
+
+## Result schema
+
+40 columns. Key groups:
+
+- **Identification**: `schema_version`, `run_id`, `trial_idx`, `timestamp_utc`
+- **Contract**: `symbol`, `secType`, `exchange`, `currency`, `conId`,
+  `expiry`, `multiplier`
+- **Strategy**: `strategy_label`, `eligible`, `skip_reason`
+- **Request**: `side` (±1), `requested_qty`, `tick_size`
+- **T0 snapshot**: `t0`, `bid_t0`, `ask_t0`, `mid_t0`, `spread_t0_bps`,
+  `spread_t0_ticks`
+- **Fill**: `t_fill`, `filled_qty`, `avg_fill_px`, `n_fills`,
+  `time_to_fill_s`, `status` (FILLED / PARTIAL / TIMEOUT / CANCELLED /
+  FAILED / SKIPPED)
+- **T_fill snapshot**: `bid_tfill`, `ask_tfill`, `mid_tfill`
+- **Quality**: `slip_vs_mid_t0_bps`, `slip_vs_vwap_bps`,
+  `slip_vs_mid_tfill_bps`, `vwap_window`
+- **Commission**: `commission` (raw, in `commission_currency`),
+  `commission_currency`, `exec_ids` (comma-joined IB execIds for audit).
+  `analyze.py` computes `commission_bps` only when `commission_currency`
+  matches `currency` — cross-currency commission/notional cases require
+  an FX rate model that isn't built yet.
+- **Round-trip pairing**: `round_trip_id`, `leg` (`entry`|`exit`).
+  Populated when `--auto-flatten` is on. Both legs of one cell share the
+  same `round_trip_id`; the entry row carries the test strategy, the
+  exit row is always `MKT_RAW` in the opposite direction. Filter
+  `leg='entry'` to compute strategy slippage; pair on `round_trip_id` to
+  compute realized round-trip P&L.
+- **Environment**: `paper_account`, `session`, `ib_server_version`, `notes`
+
+Schema is forward-compatible: parquet append uses `promote=True`, so missing
+columns become null on read. Bump `SCHEMA_VERSION` in `results.py` only on
+breaking changes (renames, type changes).
+
+## Caveats
+
+- **Paper fills are synthetic.** IB paper sim fills LMT-at-mid at the mid
+  and MKT at the touch with no book depth, queue, or impact modelling. Use
+  `spread_t0_bps` as the realistic-cost lower bound for MKT-style strategies
+  under live conditions; ship `--mode live` micro-notional runs as the
+  honest dataset.
+- **Adaptive algo doesn't fill on FUT in paper.** Orders queue in
+  `PreSubmitted` indefinitely. Expect TIMEOUTs for `MKT_ADAPTIVE` × futures
+  rows in `trials_paper.parquet`. Real signal arrives only in live mode.
+- **Fill probability is the live-only differentiator.** In paper, all
+  limit-style strategies "fill" at the requested price 100% of the time.
+  The `status` column is meaningful only in `--mode live`.
+- **Market-data subscriptions matter.** Without a CFE subscription, VIX
+  futures bid/ask is null and `LMT_MID` will be `SKIPPED` with
+  `skip_reason=no_live_quote_at_t0`. The eligibility module distinguishes
+  "strategy not supported" from "data not available."
+- **Tiny notional only.** 1 share / 1 lot / 20000 EUR. Size effects are out
+  of scope.
+- **VWAP is opportunistic.** During pre-market or thin sessions, the
+  `[t0, t_fill]` window may catch zero `AllLast` ticks; `vwap_window` will
+  be null. Spec calls this out: "Null if subscription refused (level-1-only
+  data permission) or window <1s."
+
+## Convergence target
+
+Per spec: ≥20 trials per `(instrument × strategy)` cell across ≥5
+sessions. Manually triggered (no cron). Re-run `analyze.py` after each
+session to track convergence.
+
+## Related files
+
+- [`../../METHODOLOGY.md`](../../METHODOLOGY.md) — cost decomposition
+  and caveats; the harness's empirical outputs feed sections 2 and 4.
+- [`../../calculator/`](../../calculator/) — UI-agnostic cost engine
+  that consumes the matrix CSVs this harness exports.
+- `eligibility.py`, `order_builders.py`, `quote_snapshot.py`,
+  `contract_helpers.py` (one level up in `order-execution/`) — the
+  shared primitives the harness builds on top of.

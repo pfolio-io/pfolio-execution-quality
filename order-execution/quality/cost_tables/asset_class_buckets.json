@@ -1,0 +1,33 @@
+{
+  "_doc": "Maps calculator asset-class keys (broker_ibkr.json keys) to lists of harness instrument-key patterns. Patterns are matched against `_instrument_key(df)` from quality/analyze.py, which produces strings of the form '<symbol>/<secType>' or '<symbol>/<secType>/<expiry>'. Use '*' as a wildcard for the expiry segment so any front- or back-month future qualifies.",
+  "_as_of": "2026-05-04",
+  "US_STK": [
+    "AAPL/STK"
+  ],
+  "US_SMALL_CAP_STK": [
+    "PRIM/STK"
+  ],
+  "US_ETF": [
+    "SPY/STK",
+    "LQD/STK",
+    "EFA/STK"
+  ],
+  "FUT_CME": [
+    "ES/FUT/*"
+  ],
+  "FUT_CFE": [
+    "VIX/FUT/*"
+  ],
+  "FUT_NYBOT": [
+    "DX/FUT/*"
+  ],
+  "FX_IDEALPRO": [
+    "EUR/CASH"
+  ],
+  "CFD_FX": [
+    "USD/CFD"
+  ],
+  "_aliases": {
+    "_doc": "Symbols where the calculator class differs from the natural harness secType. Reserved for future use."
+  }
+}
