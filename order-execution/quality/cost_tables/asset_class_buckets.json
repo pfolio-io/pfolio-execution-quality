@@ -5,7 +5,8 @@
     "AAPL/STK"
   ],
   "US_SMALL_CAP_STK": [
-    "PRIM/STK"
+    "PRIM/STK",
+    "BBSI/STK"
   ],
   "US_ETF": [
     "SPY/STK",

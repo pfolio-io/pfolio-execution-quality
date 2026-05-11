@@ -109,7 +109,7 @@ KNOWN_SYMBOLS = TIER1 + TIER2 + TIER3
 
 # Tier-3 small-cap default. The spec leaves the small-cap "TBD"—swap
 # this constant if the chosen ticker becomes illiquid or delists.
-SMALL_CAP_SYMBOL = "PRIM"  # Primoris Services (NYSE-listed small-cap)
+SMALL_CAP_SYMBOL = "PRIM"  # Primoris Services (NYSE-listed small-cap). 2026-05-11: ran a one-off BBSI sweep as small-cap-class replication test; BBSI fills aggregate via asset_class_buckets.json.
 
 # Per-instrument tiny notional. FX needs IDEALPRO minimum (≥20k base);
 # CFD on USD/CHF needs at least ~1k base. Single-share/contract for STK/FUT.
