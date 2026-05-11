@@ -14,24 +14,25 @@ What's implemented:
 - ✅ Regulatory fees via `reg_fees.json` (SEC, FINRA TAF, NFA, exchange clearing, PTM)
 - ✅ Transaction taxes via `tax_rules.json` (UK stamp, FR/IT FTT, CH stamp, BE TOB)
 - ✅ FX conversion to user's `base_currency` via `fx_rates.json`
-- ✅ Round-trip (`side=BOTH`) sums both legs
-- ✅ **Spread from harness median** (`harness_data.median_half_spread_bps`)
-  with bucket map in `asset_class_buckets.json`. Falls back to a static
-  table when the harness has no data for an asset class.
-- ✅ **Slippage by strategy** from harness median
-  (`harness_data.median_slip_bps_by_strategy`). Per-leg: entry uses
-  `inp.strategy`, round-trip exit always uses MKT_RAW (the auto-flatten).
-  When a strategy has no fills (e.g. MKT_ADAPTIVE in paper), the line is
-  emitted as a placeholder so the breakdown stays structurally complete.
+- ✅ Round-trip (`side=BOTH`) sums both legs using the same policy strategy.
+- ✅ **Realized execution cost** from harness median
+  (`harness_data.median_slip_bps_by_strategy`). `slip_vs_mid_t0_bps` already
+  captures both the half-spread that MKT pays and the ≈0 cost of LMT/MIDPRICE
+  filled at mid; no separate spread-cost line is added (the previous design
+  double-counted). When a strategy has no fills (e.g. MKT_ADAPTIVE in paper),
+  the line is emitted as a placeholder so the breakdown stays structurally
+  complete. Negative measured slippage is capped at zero in the total to
+  avoid promising guaranteed price improvement; the `note` field records
+  the raw measurement.
 
-⚠️ Paper slippage is **not actionable** for limit-style strategies — IB
+⚠️ Paper slippage is **not actionable** for limit-style strategies—IB
 sim fills LMT/MIDPRICE at the mid deterministically, producing a
 spuriously negative median. Source string flags this; switch to
 `harness_mode='live'` once Phase 6.5 data is in.
 
 Not yet:
 
-- Impact model `impact_bps(size)` — needs live size sweep
+- Impact model `impact_bps(size)`—needs live size sweep
 - Carry / financing for shorts and CFDs
 - Live FX-rate snapshot at fill (currently uses static `fx_rates.json`)
 
@@ -99,7 +100,7 @@ calculator/
   README.md
 ```
 
-Pure functions throughout — `compute_cost(CostInput, CostTables)` is a
+Pure functions throughout—`compute_cost(CostInput, CostTables)` is a
 deterministic mapping from inputs + tables to a `CostBreakdown`. Tables
 are loaded once via `CostTables.load()`; the result is reusable across
 multiple `compute_cost` calls.
@@ -124,8 +125,8 @@ share the same vocabulary.
 
 ## Cross-references
 
-- [`../METHODOLOGY.md`](../METHODOLOGY.md) — cost decomposition,
+- [`../METHODOLOGY.md`](../METHODOLOGY.md)—cost decomposition,
   what's measured vs. looked up, caveats, reproducing the matrix.
-- [`../order-execution/quality/`](../order-execution/quality/) — execution
+- [`../order-execution/quality/`](../order-execution/quality/)—execution
   quality harness; produces the empirical spread / slippage / commission
   data the calculator pulls from.

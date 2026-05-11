@@ -6,12 +6,12 @@ A strategy is `eligible` if it can be honestly submitted for the contract;
 production prunes ineligible steps from the chain, harness records
 ineligible cells as SKIPPED.
 
-LMT_MID         — needs live bid/ask. Eligible at this layer; the runtime
+LMT_MID       —needs live bid/ask. Eligible at this layer; the runtime
                   quote snapshot is the actual gate.
-MIDPRICE_NATIVE — needs MIDPRICE listed in contract `orderTypes`, with a
+MIDPRICE_NATIVE—needs MIDPRICE listed in contract `orderTypes`, with a
                   rule-based fallback for US/SMART contracts.
-MKT_ADAPTIVE    — secType ∉ {CASH, CFD} and MKT in contract `orderTypes`.
-MKT_RAW         — universal.
+MKT_ADAPTIVE  —secType ∉ {CASH, CFD} and MKT in contract `orderTypes`.
+MKT_RAW       —universal.
 """
 
 from __future__ import annotations

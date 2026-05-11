@@ -36,7 +36,7 @@ import nest_asyncio
 from ib_insync import CFD, IB, Contract, Forex, Order, Stock, Trade
 
 # Reuse shared primitives. Harness is independent of the production
-# executor (`ib_order_executor`) — only contract-resolution helpers are
+# executor (`ib_order_executor`)—only contract-resolution helpers are
 # shared via `contract_helpers`.
 _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
@@ -75,7 +75,7 @@ COMMISSION_WAIT_S = 2.0  # how long to wait for commissionReport events post-fil
 class SubmitResult:
     """Result of one submit-and-wait attempt (or accumulated retries).
     `commission_total` and `realized_pnl_total` are in `commission_currency`
-    (raw — analyze.py normalizes to bps). `realized_pnl_total` is non-zero
+    (raw—analyze.py normalizes to bps). `realized_pnl_total` is non-zero
     only on closing fills (the auto-flatten exit leg, typically). `exec_ids`
     is a comma-joined string of IB execIds so it round-trips cleanly through
     parquet."""
@@ -92,8 +92,8 @@ class SubmitResult:
 
 ALL_STRATEGIES = ("MIDPRICE_NATIVE", "LMT_MID", "MKT_ADAPTIVE", "MKT_RAW")
 
-# Tier 1 — high liquidity. Tier 2 — medium liquidity / wider spread.
-# Tier 3 — low liquidity / structurally wider. Order matters only for
+# Tier 1—high liquidity. Tier 2—medium liquidity / wider spread.
+# Tier 3—low liquidity / structurally wider. Order matters only for
 # run-time logs; analysis treats each (instrument × strategy) cell
 # independently.
 TIER1 = ("AAPL", "SPY", "ES", "EURUSD")
@@ -107,7 +107,7 @@ TIERS = {
 }
 KNOWN_SYMBOLS = TIER1 + TIER2 + TIER3
 
-# Tier-3 small-cap default. The spec leaves the small-cap "TBD" — swap
+# Tier-3 small-cap default. The spec leaves the small-cap "TBD"—swap
 # this constant if the chosen ticker becomes illiquid or delists.
 SMALL_CAP_SYMBOL = "PRIM"  # Primoris Services (NYSE-listed small-cap)
 
@@ -121,7 +121,7 @@ DEFAULT_QTY = {
 
 # Live-mode quantities. IDEALPRO live minimum is typically 25k base for
 # EURUSD; CFD on USD/CHF lives at the broker's live minimum (also ~25k
-# typical). All others stay at 1 unit — explicit live overrides only
+# typical). All others stay at 1 unit—explicit live overrides only
 # where the live floor differs from paper.
 DEFAULT_QTY_LIVE = {
     **DEFAULT_QTY,
@@ -455,7 +455,7 @@ async def run_trial(
         row["status"] = "SKIPPED"
         return row
 
-    # T0 snapshot — used for slippage measurement when available. Only LMT_MID
+    # T0 snapshot—used for slippage measurement when available. Only LMT_MID
     # actually *requires* a live mid to construct its order; the others can
     # submit without one (IB picks the price for MIDPRICE; MKT/Adaptive don't
     # care). When there's no quote, those strategies still run, with T0
@@ -535,7 +535,7 @@ async def run_trial(
             "mid_tfill": q_fill.mid,
         })
 
-    # VWAP window — qty-weighted across AllLast ticks in [t0, t_fill].
+    # VWAP window—qty-weighted across AllLast ticks in [t0, t_fill].
     vwap = recorder.vwap(t0_dt, t_fill_dt)
     if vwap is not None:
         row["vwap_window"] = vwap
@@ -563,7 +563,7 @@ async def _connect(mode: str) -> IB:
     Hard rule: refuse to start when `mode=live` is paired with a paper
     account (DU prefix). Writing paper-account fills into trials_live.parquet
     would silently corrupt the live calibration dataset. The reverse
-    (`mode=paper` on a live account) is just a warning — paper-store rows
+    (`mode=paper` on a live account) is just a warning—paper-store rows
     don't drive any live decisions, but the flag mismatch is suspicious."""
     ib = IB()
     await ib.connectAsync(IB_HOST, IB_PORT, clientId=IB_CLIENT_ID)
@@ -596,7 +596,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument(
         "--side", nargs="+", choices=("BUY", "SELL"), default=["BUY"],
         help="One or more sides. Pass `BUY SELL` to run both legs in one "
-             "invocation — first-order drift bias cancels across legs.",
+             "invocation—first-order drift bias cancels across legs.",
     )
     p.add_argument(
         "--qty", type=float, default=None,
@@ -658,7 +658,7 @@ def _preflight_live(symbols: list[str], strategies: list[str], sides: list[str],
     est_max_total = n_cells * est_max_per_fill_usd * 2  # entry + exit
     print()
     print("============================================================")
-    print("LIVE MODE — real orders will be placed")
+    print("LIVE MODE—real orders will be placed")
     print("============================================================")
     print(f"  instruments   : {symbols}")
     print(f"  strategies    : {strategies}")

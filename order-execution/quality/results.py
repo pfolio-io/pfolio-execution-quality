@@ -40,7 +40,7 @@ COLUMNS: list[str] = [
     "commission", "commission_currency", "exec_ids",
     # realized P&L from commissionReport.realizedPNL on closing fills,
     # in commission_currency. NOTE: IB computes this against the
-    # *account's* position average cost basis at fill time — NOT against
+    # *account's* position average cost basis at fill time—NOT against
     # the entry leg of this round-trip. On accounts with accumulated
     # positions (e.g. our paper account), realized_pnl can diverge
     # significantly from a clean (exit_px − entry_px) × qty × multiplier
@@ -50,7 +50,7 @@ COLUMNS: list[str] = [
     "realized_pnl",
     # round-trip pairing (set when --auto-flatten is on; null otherwise)
     "round_trip_id", "leg",
-    # debug — IB error codes / cancellation reasons captured from trade.log
+    # debug—IB error codes / cancellation reasons captured from trade.log
     "notes",
 ]
 

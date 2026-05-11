@@ -1,4 +1,4 @@
-# Execution Quality Report — `paper`
+# Execution Quality Report—`paper`
 
 Slice: **last-run=20260504T171243Z-b1a954d1**
 Trials: **128**  · runs: **1**  · instruments: **11**
@@ -28,7 +28,7 @@ Trials: **128**  · runs: **1**  · instruments: **11**
 | MKT_ADAPTIVE    |      0 |      18 |       4 |
 | MKT_RAW         |     58 |       4 |       0 |
 
-## Slippage distribution — `slip_vs_mid_t0_bps` (FILLED only)
+## Slippage distribution—`slip_vs_mid_t0_bps` (FILLED only)
 
 | strategy_label  | count | median |     p90 |
 |:----------------|------:|-------:|--------:|
@@ -36,16 +36,16 @@ Trials: **128**  · runs: **1**  · instruments: **11**
 | MIDPRICE_NATIVE |     8 | -3.176 | -0.3029 |
 | MKT_RAW         |    54 | 0.5379 | 15.1702 |
 
-## Slippage distribution — `slip_vs_vwap_bps` (FILLED only)
+## Slippage distribution—`slip_vs_vwap_bps` (FILLED only)
 
-_Reported only — primary ranking still uses `slip_vs_mid_t0_bps`. Null when VWAP unavailable._
+_Reported only—primary ranking still uses `slip_vs_mid_t0_bps`. Null when VWAP unavailable._
 
 | strategy_label | count |  median |     p90 |
 |:---------------|------:|--------:|--------:|
 | LMT_MID        |     1 | -0.1392 | -0.1392 |
 | MKT_RAW        |     1 |  0.4008 |  0.4008 |
 
-## Time-to-fill distribution — `time_to_fill_s` (FILLED only)
+## Time-to-fill distribution—`time_to_fill_s` (FILLED only)
 
 | strategy_label  | count | median |     p90 |
 |:----------------|------:|-------:|--------:|

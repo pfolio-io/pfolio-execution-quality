@@ -1,5 +1,5 @@
 """
-Contract resolution helpers — shared between the production executor and the
+Contract resolution helpers—shared between the production executor and the
 quality harness. Stdlib-only logic; depends only on `ib_insync`.
 """
 
@@ -17,7 +17,7 @@ async def _qualify_contract(ib: IB, contract: Contract) -> Contract:
     Fills in missing fields (conId, multiplier, tradingClass, currency, etc.).
 
     If the first attempt fails and an exchange was specified, retries with
-    exchange='' so IB searches all venues — useful for diagnosing whether
+    exchange='' so IB searches all venues—useful for diagnosing whether
     the exchange code is the problem.
 
     Raises ValueError if IB cannot find a unique match.
@@ -26,7 +26,7 @@ async def _qualify_contract(ib: IB, contract: Contract) -> Contract:
 
     if not qualified and contract.exchange:
         log.warning(
-            "%s: qualification failed with exchange=%r — retrying with exchange='' to search all venues",
+            "%s: qualification failed with exchange=%r—retrying with exchange='' to search all venues",
             contract.symbol, contract.exchange,
         )
         probe = copy.copy(contract)
@@ -34,7 +34,7 @@ async def _qualify_contract(ib: IB, contract: Contract) -> Contract:
         qualified = await ib.qualifyContractsAsync(probe)
         if qualified:
             log.info(
-                "%s: found on exchange=%s — update your contract definition",
+                "%s: found on exchange=%s—update your contract definition",
                 contract.symbol, qualified[0].exchange,
             )
 
@@ -43,11 +43,11 @@ async def _qualify_contract(ib: IB, contract: Contract) -> Contract:
             f"No security definition found for {contract.symbol} "
             f"(secType={contract.secType!r}, exchange={contract.exchange!r}, "
             f"lastTradeDateOrContractMonth={contract.lastTradeDateOrContractMonth!r}, "
-            f"currency={contract.currency!r}) — verify the contract fields"
+            f"currency={contract.currency!r})—verify the contract fields"
         )
     if len(qualified) > 1:
         log.warning(
-            "%s: %d contracts matched — using first (conId=%s exchange=%s)",
+            "%s: %d contracts matched—using first (conId=%s exchange=%s)",
             contract.symbol, len(qualified), qualified[0].conId, qualified[0].exchange,
         )
     c = qualified[0]

@@ -2,11 +2,12 @@
   "_doc": "USD-anchored FX rates: each value is the USD price of 1 unit of that currency. Edit when rates drift more than ~5%. analyze.py reads this file at report time; runner.py does not depend on it. Use IDEALPRO mid quotes when refreshing.",
   "_as_of": "2026-05-04",
   "USD": 1.0,
+  "AUD": 0.66,
+  "CAD": 0.74,
+  "CHF": 1.20,
   "EUR": 1.10,
   "GBP": 1.27,
-  "CHF": 1.20,
   "JPY": 0.0066,
-  "CAD": 0.74,
-  "AUD": 0.66,
+  "NZD": 0.61,
   "HKD": 0.128
 }

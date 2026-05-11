@@ -22,7 +22,7 @@ drift bias.
 
 ## The four strategies
 
-Each is built and submitted **directly** by the harness — bypassing
+Each is built and submitted **directly** by the harness—bypassing
 production's spread-driven chain (TIGHT/WIDE/NO_QUOTE in
 `ib_order_executor.submit_order`) so no fallback contaminates the
 per-strategy measurement.
@@ -75,7 +75,7 @@ order-execution/
   quote_snapshot.py    # Quote, snapshot_quote, slip_vs_mid_bps (shared)
   quality/
     __init__.py
-    runner.py          # entry point — sweeps (side × instrument × strategy)
+    runner.py          # entry point—sweeps (side × instrument × strategy)
     instruments.py     # front-month resolution helper
     metrics.py         # TickRecorder/VWAP (harness-only) + re-exports of the
                        # shared shapes for backward-compatible imports
@@ -134,7 +134,7 @@ python -m quality.analyze --last-run --report-path RTH.md   # write to a separat
 | `--qty`             | per-symbol                 | Override; default uses `DEFAULT_QTY` (FX = 20000, others = 1)                                                        |
 | `--outside-rth`     | off                        | Allow pre/post-market fills for US equities                                                                          |
 | `--auto-flatten`    | live=on, paper=off         | After each FILLED entry leg, fire MKT_RAW exit at same qty so net exposure stays ~0. Both legs share `round_trip_id` |
-| `--no-auto-flatten` | —                          | Force-disable auto-flatten (positions accumulate)                                                                    |
+| `--no-auto-flatten` |—                        | Force-disable auto-flatten (positions accumulate)                                                                    |
 | `--yes-live`        | required for `--mode=live` | Confirms real orders will be placed against a live account                                                           |
 
 ## Live mode
@@ -144,9 +144,9 @@ safeguards:
 
 1. **Pre-flight banner** prints the cell count and a rough max-commission
    estimate before any orders fire.
-2. **`--yes-live` is required** — without it, the runner exits before
+2. **`--yes-live` is required**—without it, the runner exits before
    connecting to TWS.
-3. **Account-prefix gate** — refuses to start if the connected account
+3. **Account-prefix gate**—refuses to start if the connected account
    starts with `DU` (paper). Prevents paper fills from polluting the
    live calibration dataset.
 
@@ -197,7 +197,7 @@ Defined in `runner.py`:
 - **Commission**: `commission` (raw, in `commission_currency`),
   `commission_currency`, `exec_ids` (comma-joined IB execIds for audit).
   `analyze.py` computes `commission_bps` only when `commission_currency`
-  matches `currency` — cross-currency commission/notional cases require
+  matches `currency`—cross-currency commission/notional cases require
   an FX rate model that isn't built yet.
 - **Round-trip pairing**: `round_trip_id`, `leg` (`entry`|`exit`).
   Populated when `--auto-flatten` is on. Both legs of one cell share the
@@ -243,10 +243,10 @@ session to track convergence.
 
 ## Related files
 
-- [`../../METHODOLOGY.md`](../../METHODOLOGY.md) — cost decomposition
+- [`../../METHODOLOGY.md`](../../METHODOLOGY.md)—cost decomposition
   and caveats; the harness's empirical outputs feed sections 2 and 4.
-- [`../../calculator/`](../../calculator/) — UI-agnostic cost engine
+- [`../../calculator/`](../../calculator/)—UI-agnostic cost engine
   that consumes the matrix CSVs this harness exports.
 - `eligibility.py`, `order_builders.py`, `quote_snapshot.py`,
-  `contract_helpers.py` (one level up in `order-execution/`) — the
+  `contract_helpers.py` (one level up in `order-execution/`)—the
   shared primitives the harness builds on top of.

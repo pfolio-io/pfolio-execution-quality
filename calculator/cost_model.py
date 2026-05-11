@@ -1,7 +1,7 @@
 """
 Cost-model core: turn an instrument + size + side into a bps breakdown.
 
-This module is deliberately UI-agnostic — it knows nothing about HTML or
+This module is deliberately UI-agnostic—it knows nothing about HTML or
 any rendering layer. It loads static lookup tables from
 `order-execution/quality/cost_tables/` and (eventually) empirical spread
 data from the harness's parquet store, and returns a structured
@@ -39,7 +39,7 @@ class CostInput:
     """A single trade or round-trip request.
 
     `qty` and `price` are unsigned magnitudes; `side` carries direction.
-    `side="BOTH"` means a round-trip — both legs are computed and summed.
+    `side="BOTH"` means a round-trip—both legs are computed and summed.
     `asset_class` keys the broker/reg/tax tables (e.g. "US_STK",
     "FUT_CME", "FX_IDEALPRO"). `jurisdiction` is the ISO-2 code that
     drives transaction-tax lookup; auto-derived from `asset_class` when
@@ -326,34 +326,31 @@ def _transaction_tax(inp: CostInput, tables: CostTables) -> list[CostLine]:
     return lines
 
 
-# Static spread fallback (bps, half-spread) used when the harness has no
-# data for an asset class (e.g. CFE/NYBOT without market-data permission)
-# or when the harness store is missing entirely. The harness accessor
-# returns more accurate numbers whenever spread_t0_bps rows exist.
-_DEFAULT_HALF_SPREAD_BPS = {
-    "US_STK": 1.0, "US_SMALL_CAP_STK": 20.0, "US_ETF": 0.2,
-    "EU_STK_XETRA": 1.5, "EU_STK_LSE": 1.5, "EU_STK_SIX": 3.0,
-    "FUT_CME": 0.2, "FUT_CFE": 12.0, "FUT_NYBOT": 0.5, "FUT_EUREX": 1.0,
-    "FX_IDEALPRO": 0.1, "CFD_FX": 0.1, "CFD_INDEX": 1.0,
-}
-
 
 def _slippage_cost(
         inp: CostInput, tables: CostTables, *, harness_mode: str = "paper",
 ) -> list[CostLine]:
-    """Slippage on top of the half-spread, per leg, by entry strategy.
+    """Realized execution cost per leg, measured as `slip_vs_mid_t0_bps`.
 
-    Returns one line for the entry leg's slippage (using `inp.strategy`)
-    and — when `side=BOTH` — a second line for the exit leg's MKT_RAW
-    slippage (auto-flatten always uses MKT_RAW). Lines come from the
-    harness median.
+    Returns one line per leg. The same policy strategy applies to entry
+    and (for `side=BOTH`) exit — no auto-flatten asymmetry; the harness's
+    auto-flatten exit is a test-fixture choice, not what a user would do.
 
-    On `mode=paper`, IB's sim fills LMT/MIDPRICE at the mid and MKT at
-    the touch deterministically — the paper median understates real LMT
-    slippage and overstates MKT_RAW cleanliness. The line is still
-    emitted so the breakdown is structurally complete and so the source
-    string clearly flags the paper-mode caveat; switch to `mode=live`
-    once Phase 6.5 data lands.
+    `slip_vs_mid_t0_bps` already captures the full execution cost vs the
+    mid at submit: a plain MKT fill at the touch shows up as a positive
+    bps cost equal to the half-spread crossed; a LMT_MID fill at the mid
+    shows up as ≈0. A separate "spread cost" line would double-count.
+
+    Negative measured slippage (price improvement) is capped at zero in
+    the breakdown so the total isn't a promise of guaranteed price
+    improvement at low sample sizes. The `note` field records the raw
+    measurement for transparency; the raw matrix view shows the unclamped
+    median for those who want to see it.
+
+    On `mode=paper`, IB's sim fills LMT/MIDPRICE at the mid deterministically
+    and MKT at the touch — paper median understates real LMT slippage and
+    overstates MKT cleanliness. The source string flags paper-mode
+    explicitly; prefer `mode=live` whenever live data is available.
     """
     notional_native = inp.qty * inp.price * inp.multiplier
     notional_base = _to_base(
@@ -373,68 +370,42 @@ def _slippage_cost(
                 source=f"no harness({harness_mode}) slip data for "
                        f"{inp.asset_class}×{strategy}",
                 side=leg_label,
-                note="placeholder — needs live or more paper data",
+                note="placeholder—needs live or more paper data",
             )
         cov = harness_data.coverage_by_strategy(
             inp.asset_class, strategy, mode=harness_mode,
         )
+        capped_bps = max(0.0, slip_bps)
+        cap_note = (
+            f"measured {slip_bps:.2f} bps (price improvement); "
+            f"capped at 0 in total"
+        ) if slip_bps < 0 else ""
+        paper_note = (
+            "paper sim is not actionable for LMT/MIDPRICE—switch to mode=live"
+        ) if harness_mode == "paper" else ""
+        note = "; ".join(n for n in (cap_note, paper_note) if n)
         return CostLine(
             label=f"slippage [{leg_label}, {strategy}]",
-            value_base_ccy=notional_base * slip_bps / 1e4,
-            bps_of_notional=slip_bps,
+            value_base_ccy=notional_base * capped_bps / 1e4,
+            bps_of_notional=capped_bps,
             source=f"harness({harness_mode}).median slip_vs_mid_t0_bps "
                    f"[n={cov['with_slip']}]",
             side=leg_label,
-            note=("paper sim is not actionable for LMT/MIDPRICE — "
-                  "switch to mode=live when available")
-            if harness_mode == "paper" else "",
+            note=note,
         )
 
     lines: list[CostLine] = []
+    # Same policy strategy on both legs of a round-trip — a real user
+    # executes both legs the same way; auto-flatten MKT exit is a harness
+    # test-fixture choice, not a user pattern.
     entry_line = _line(inp.strategy, "entry" if inp.side == "BOTH" else inp.side)
     if entry_line is not None:
         lines.append(entry_line)
     if inp.side == "BOTH":
-        exit_line = _line("MKT_RAW", "exit")
+        exit_line = _line(inp.strategy, "exit")
         if exit_line is not None:
             lines.append(exit_line)
     return lines
-
-
-def _spread_cost(
-        inp: CostInput, tables: CostTables, *, harness_mode: str = "paper",
-) -> Optional[CostLine]:
-    """Spread cost line: prefer harness median (empirical), fall back to
-    the static table. `harness_mode` selects paper vs live store."""
-    half = harness_data.median_half_spread_bps(inp.asset_class, mode=harness_mode)
-    if half is not None:
-        cov = harness_data.coverage(inp.asset_class, mode=harness_mode)
-        source = (
-            f"harness({harness_mode}).median spread_t0_bps/2 "
-            f"[n={cov['with_spread']} rows]"
-        )
-        note = ""
-    else:
-        half = _DEFAULT_HALF_SPREAD_BPS.get(inp.asset_class)
-        if half is None:
-            return None
-        source = f"static:_DEFAULT_HALF_SPREAD_BPS[{inp.asset_class}]"
-        note = "no harness data for this asset class — static fallback"
-
-    notional_native = inp.qty * inp.price * inp.multiplier
-    notional_base = _to_base(
-        notional_native, inp.contract_currency or inp.base_currency,
-        inp.base_currency, tables.fx_rates,
-    )
-    legs = 2 if inp.side == "BOTH" else 1
-    bps = half * legs
-    return CostLine(
-        label="spread (half × legs)",
-        value_base_ccy=notional_base * bps / 1e4,
-        bps_of_notional=bps,
-        source=source,
-        note=note,
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -469,9 +440,6 @@ def compute_cost(
     )
     breakdown = CostBreakdown(input=inp, notional_base_ccy=notional_base)
 
-    spread = _spread_cost(inp, tables, harness_mode=harness_mode)
-    if spread:
-        breakdown.lines.append(spread)
     breakdown.lines.extend(_slippage_cost(inp, tables, harness_mode=harness_mode))
     comm = _commission(inp, tables)
     if comm:

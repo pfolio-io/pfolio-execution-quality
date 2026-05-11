@@ -1,7 +1,7 @@
 """Harness-only execution-quality helpers: VWAP via tick-by-tick recorder.
 
 `Quote`, `snapshot_quote`, and `slip_vs_mid_bps` were promoted to the
-shared `quote_snapshot` module — re-exported here for harness call-site
+shared `quote_snapshot` module—re-exported here for harness call-site
 stability.
 """
 
@@ -20,7 +20,7 @@ class TickRecorder:
     """
     Wrap `reqTickByTickData("AllLast")` to compute trade-VWAP over a
     `[t0, t_fill]` wall-clock window. Designed to fail-soft: if IB refuses
-    the subscription (e.g. errorCode 354 — no market data permission), the
+    the subscription (e.g. errorCode 354—no market data permission), the
     accumulator just stays empty and `vwap()` returns None.
 
     Usage:
@@ -43,7 +43,7 @@ class TickRecorder:
                 self.contract, "AllLast", numberOfTicks=0, ignoreSize=False,
             )
             self._started = True
-        except Exception:  # noqa: BLE001 — fail-soft; null VWAP is acceptable
+        except Exception:  # noqa: BLE001—fail-soft; null VWAP is acceptable
             self._ticker = None
             self._started = False
 

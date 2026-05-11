@@ -2,12 +2,12 @@
 
 Two paired packages:
 
-- **[`order-execution/quality/`](order-execution/quality/)** — a repeatable
+- **[`order-execution/quality/`](order-execution/quality/)**—a repeatable
   test harness that submits four order strategies across a curated set of
   Interactive Brokers instruments and records execution-quality metrics
   (slippage vs. mid, time-to-fill, commissions). Outputs parquet/CSV trial
   rows and a Markdown report.
-- **[`calculator/`](calculator/)** — a UI-agnostic engine that turns
+- **[`calculator/`](calculator/)**—a UI-agnostic engine that turns
   `(asset_class, qty, price, side)` into a bps-of-notional cost breakdown.
   Pulls empirical spread + slippage from the harness's matrix CSV and falls
   back to static lookup tables for commissions, regulatory fees, taxes,

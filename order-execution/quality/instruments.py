@@ -47,7 +47,7 @@ async def resolve_front_month(
             if len(raw) == 8:
                 expiry = dt.datetime.strptime(raw, "%Y%m%d").date()
             elif len(raw) == 6:
-                # YYYYMM form — treat as last day of that month
+                # YYYYMM form—treat as last day of that month
                 year, month = int(raw[:4]), int(raw[4:6])
                 expiry = (
                         dt.date(year + (month // 12), (month % 12) + 1, 1)

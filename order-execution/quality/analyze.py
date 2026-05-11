@@ -205,7 +205,7 @@ def coverage_table(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def status_distribution(df: pd.DataFrame) -> pd.DataFrame:
-    """Per-strategy count of statuses — fill-quality view."""
+    """Per-strategy count of statuses—fill-quality view."""
     out = df.pivot_table(
         index="strategy_label", columns="status",
         values="run_id", aggfunc="count", fill_value=0,
@@ -273,7 +273,7 @@ def _commission_bps_row(row: pd.Series, rates: dict[str, float]) -> float:
     """Commission as bps of notional. Notional = qty × price × multiplier
     (multiplier defaults to 1 for non-derivatives). When commission_currency
     differs from contract.currency, both are converted to USD via the FX
-    table — bps is dimensionless so any common pivot works. Returns NaN
+    table—bps is dimensionless so any common pivot works. Returns NaN
     when commission is missing, qty/price are non-positive, or any
     relevant currency is missing from the FX table."""
     commission = row.get("commission")
@@ -331,7 +331,7 @@ def commission_summary(df: pd.DataFrame, rates: dict[str, float]) -> pd.DataFram
 
 
 def t0_spread_report(df: pd.DataFrame) -> pd.DataFrame:
-    """Per-instrument median T0 spread in bps — realistic-cost lower bound
+    """Per-instrument median T0 spread in bps—realistic-cost lower bound
     for MKT-style strategies under live conditions."""
     rows = df[df["spread_t0_bps"].notna()].copy()
     if rows.empty:
@@ -358,7 +358,7 @@ def _md_table(df: pd.DataFrame) -> str:
 def render_report(df: pd.DataFrame, mode: str, slice_label: str = "all rows") -> str:
     rates = _load_fx_rates()
     parts: list[str] = []
-    parts.append(f"# Execution Quality Report — `{mode}`\n")
+    parts.append(f"# Execution Quality Report—`{mode}`\n")
     parts.append(f"Slice: **{slice_label}**\n")
     parts.append(f"Trials: **{len(df)}**  ·  runs: **{df['run_id'].nunique()}**  "
                  f"·  instruments: **{_instrument_key(df).nunique()}**\n")
@@ -369,15 +369,15 @@ def render_report(df: pd.DataFrame, mode: str, slice_label: str = "all rows") ->
     parts.append("\n## Fill-quality (status distribution per strategy)\n")
     parts.append(_md_table(status_distribution(df)))
 
-    parts.append(f"\n## Slippage distribution — `{PRIMARY_METRIC}` (FILLED only)\n")
+    parts.append(f"\n## Slippage distribution—`{PRIMARY_METRIC}` (FILLED only)\n")
     parts.append(_md_table(metric_summary(df, PRIMARY_METRIC)))
 
-    parts.append(f"\n## Slippage distribution — `{SECONDARY_METRIC}` (FILLED only)\n")
-    parts.append("_Reported only — primary ranking still uses "
+    parts.append(f"\n## Slippage distribution—`{SECONDARY_METRIC}` (FILLED only)\n")
+    parts.append("_Reported only—primary ranking still uses "
                  f"`{PRIMARY_METRIC}`. Null when VWAP unavailable._\n\n")
     parts.append(_md_table(metric_summary(df, SECONDARY_METRIC)))
 
-    parts.append(f"\n## Time-to-fill distribution — `{TIEBREAK_METRIC}` (FILLED only)\n")
+    parts.append(f"\n## Time-to-fill distribution—`{TIEBREAK_METRIC}` (FILLED only)\n")
     parts.append(_md_table(metric_summary(df, TIEBREAK_METRIC)))
 
     parts.append("\n## T0 spread per instrument (realistic-cost lower bound)\n")
@@ -454,7 +454,7 @@ def main() -> None:
     if args.export_matrix_csv:
         matrix = bucket_strategy_matrix(sliced)
         if matrix.empty:
-            print("[matrix] no rows to export — empty filter or no fills")
+            print("[matrix] no rows to export—empty filter or no fills")
             return
         args.export_matrix_csv.parent.mkdir(parents=True, exist_ok=True)
         matrix.to_csv(args.export_matrix_csv, index=False, float_format="%.4f")

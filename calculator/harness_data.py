@@ -2,14 +2,14 @@
 Accessor over the order-execution quality harness's parquet store.
 
 Purpose: surface empirical median spread (and, later, slippage and fill
-rates) so the cost model can replace its static fallbacks. Read-only —
+rates) so the cost model can replace its static fallbacks. Read-only—
 this module never writes to the harness's parquet store.
 
 Asset-class bucketing is config-driven via
 `order-execution/quality/cost_tables/asset_class_buckets.json`, which maps
 calculator keys (e.g. `US_STK`, `FUT_CME`) to lists of harness
 instrument-key patterns. Patterns match `_instrument_key(df)` from
-`quality/analyze.py` — the canonical `<symbol>/<secType>` or
+`quality/analyze.py`—the canonical `<symbol>/<secType>` or
 `<symbol>/<secType>/<expiry>` form.
 """
 
@@ -82,29 +82,6 @@ def _filter_by_asset_class(df: pd.DataFrame, asset_class: str) -> pd.DataFrame:
     return df[mask]
 
 
-def median_half_spread_bps(
-        asset_class: str, mode: str = "paper",
-) -> Optional[float]:
-    """Median half of `spread_t0_bps` across harness rows in `asset_class`.
-
-    Half-spread is what a one-leg trade pays vs the mid; the cost model
-    multiplies by `legs` (1 for single-leg, 2 for round-trip) to compute
-    spread cost. Returns None when no qualifying rows exist so the caller
-    can fall back.
-    """
-    try:
-        df = _load_trials(mode)
-    except FileNotFoundError:
-        return None
-    rows = _filter_by_asset_class(df, asset_class)
-    if rows.empty:
-        return None
-    full_spread = rows["spread_t0_bps"].dropna()
-    if full_spread.empty:
-        return None
-    return float(full_spread.median()) / 2.0
-
-
 def median_slip_bps_by_strategy(
         asset_class: str, strategy: str, mode: str = "paper",
 ) -> Optional[float]:
@@ -115,7 +92,7 @@ def median_slip_bps_by_strategy(
       - asset_class via the bucket map
       - strategy_label == strategy
       - status == FILLED
-      - leg ∈ {NaN, 'entry'}  — exit-leg slippage is always MKT_RAW and
+      - leg ∈ {NaN, 'entry'}—exit-leg slippage is always MKT_RAW and
         a function of the entry, not of the entry strategy
 
     NOTE on paper data: paper sim fills LMT_MID at the mid and MKT_RAW

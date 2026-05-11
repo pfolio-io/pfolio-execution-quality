@@ -3,7 +3,7 @@ One-shot quote snapshot + slippage helper. Shared between the production
 executor (used at submit time to route TIGHT/WIDE) and the harness runner
 (used at T0 and T_fill to grade execution quality).
 
-Returning `None` from `snapshot_quote` is normal and expected — markets
+Returning `None` from `snapshot_quote` is normal and expected—markets
 closed, no subscription, instrument with sparse quotes (CFD, near-expiry
 futures). Callers must handle null.
 """
