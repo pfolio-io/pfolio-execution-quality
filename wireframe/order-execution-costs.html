@@ -1,0 +1,1403 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta content="width=device-width,initial-scale=1" name="viewport">
+    <title>Order execution costs—wireframe</title>
+    <link href="https://fonts.googleapis.com" rel="preconnect">
+    <link crossorigin href="https://fonts.gstatic.com" rel="preconnect">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Source+Serif+Pro:wght@700&display=swap"
+          rel="stylesheet">
+    <style>
+        /* ───────────────────────────────────────────────────────
+           WIREFRAME ONLY—colors and typography mirrored from the
+           pfolio.io webflow.shared CSS (variables + utility-class
+           specs) so the wireframe previews on-brand. Final port to
+           Webflow will replace this with the production utility
+           classes (display-heading-1, large-text, etc.).
+           ─────────────────────────────────────────────────────── */
+        :root {
+          /* Brand palette (from pfolio.io webflow.shared.min.css :root) */
+          --gray-1: #1f2f36;
+          --gray-2: #dee2e6;
+          --gray-3: #f8f9fa;
+          --primary-1: #264653;
+          --primary-2: #00bfb2;
+          --primary-4: #ef6f6c;
+          --border-color-dark: #1414141a;
+          --success: #0cce6b;
+          --danger: #d00000;
+          --warning: #faa307;
+
+          /* Local aliases */
+          --ink: var(--gray-1);
+          --muted: var(--gray-1);    /* was #5a6b73; user asked for brand ink everywhere */
+          --rule: var(--gray-2);
+          --bg: var(--gray-3);
+          --accent: var(--primary-1);
+
+          /* Diverging scale for the matrix:
+             cost (positive bps) → coral; improvement (negative) → brand teal. */
+          --good-strong: #00bfb2;
+          --good-light:  #d6f4f1;
+          --bad-strong:  #ef6f6c;
+          --bad-light:   #fbe1df;
+        }
+        * { box-sizing: border-box; }
+        body {
+          margin: 0;
+          font-family: Poppins, Arial, sans-serif;
+          font-size: 16px;
+          font-weight: 400;
+          line-height: 1.5;
+          color: var(--ink);
+          background: white;
+          -webkit-font-smoothing: antialiased;
+          -moz-osx-font-smoothing: grayscale;
+        }
+        .container { max-width: 920px; margin: 0 auto; padding: 0 24px; }
+        section { padding: 72px 0; border-bottom: 1px solid var(--rule); }
+        section:last-of-type { border-bottom: none; }
+
+        /* Eyebrow uses the brand h6 spec: Source Serif Pro 16/24 700, ink */
+        .eyebrow {
+          font-family: 'Source Serif Pro', 'Times New Roman', serif;
+          font-size: 16px;
+          line-height: 24px;
+          font-weight: 700;
+          color: var(--ink);
+          margin: 0 0 18px;
+          text-align: center;
+        }
+        /* Display headings—Source Serif Pro 700 across all levels */
+        h1, h2, h3, h4, h5, h6 {
+          font-family: 'Source Serif Pro', 'Times New Roman', serif;
+          font-weight: 700;
+          color: var(--ink);
+          letter-spacing: 0;
+        }
+        /* Hero H1 = display-heading-1: 72/72 desktop, 44/46 tablet, 32/36 mobile */
+        h1 {
+          font-size: 72px;
+          line-height: 72px;
+          text-align: center;
+          margin: 0 0 24px;
+        }
+        /* Tagline = large-text: 20/30 desktop, 16/24 mobile */
+        .tagline {
+          font-size: 20px;
+          line-height: 30px;
+          font-weight: 400;
+          text-align: center;
+          color: var(--ink);
+          max-width: 640px;
+          margin: 0 auto 40px;
+        }
+        .intro p {
+          font-size: 16px;
+          line-height: 1.5;
+          max-width: 640px;
+          margin: 0 auto 14px;
+          color: var(--ink);
+        }
+
+        /* Section H2: 40/44 desktop, 32/36 tablet, 28/32 mobile */
+        h2 {
+          font-size: 40px;
+          line-height: 44px;
+          margin: 0 0 18px;
+        }
+        h2 .num { color: var(--muted); margin-right: 12px; font-weight: 400; }
+        h3 {
+          font-size: 24px;
+          line-height: 30px;
+          margin: 32px 0 12px;
+        }
+        .sub-instr {
+          color: var(--muted);
+          margin: 0 0 28px;
+          font-size: 16px;
+          line-height: 1.5;
+        }
+
+        a {
+          color: var(--ink);
+          font-weight: 600;
+          text-decoration: none;
+          transition: opacity .2s;
+        }
+        a:hover { opacity: .5; }
+
+        /* Matrix */
+        .matrix-wrap { overflow-x: auto; }
+        table.matrix {
+          width: 100%;
+          border-collapse: collapse;
+          font-size: 14px;
+          margin-top: 8px;
+        }
+        table.matrix th, table.matrix td {
+          padding: 16px 12px;
+          border-bottom: 1px solid var(--rule);
+          text-align: right;
+          vertical-align: top;
+        }
+        table.matrix th {
+          font-family: Poppins, Arial, sans-serif;
+          font-weight: 600;
+          font-size: 13px;
+          color: var(--muted);
+          text-align: right;
+        }
+        table.matrix th:first-child, table.matrix td:first-child {
+          text-align: left;
+          font-weight: 500;
+          color: var(--ink);
+        }
+        table.matrix td.cell { position: relative; padding-right: 28px; }
+        table.matrix td.cell .bps {
+          font-variant-numeric: tabular-nums;
+          font-weight: 600;
+          font-size: 15px;
+          color: var(--ink);
+        }
+        table.matrix td.cell .n {
+          font-size: 11px;
+          color: var(--muted);
+          margin-top: 2px;
+        }
+        table.matrix td.cell.empty { color: var(--muted); }
+        table.matrix td.cell.empty .bps { font-weight: 500; font-size: 14px; }
+        table.matrix td.cell.thin { font-style: italic; }
+        table.matrix td.cell.recommended .bps::after {
+          content: " ✓";
+          color: var(--primary-2);
+          font-weight: 700;
+        }
+        .footnote {
+          font-size: 14px;
+          color: var(--muted);
+          margin-top: 20px;
+          line-height: 1.5;
+        }
+
+        /* Policy band chains */
+        .chain {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 8px;
+          margin: 14px 0 22px;
+        }
+        .chain .step {
+          padding: 6px 14px;
+          border: 1px solid var(--rule);
+          border-radius: 999px;
+          background: white;
+          color: var(--ink);
+          font-size: 13px;
+          font-weight: 500;
+          font-family: Poppins, Arial, sans-serif;
+        }
+        .chain .step.primary {
+          background: var(--primary-1);
+          border-color: var(--primary-1);
+          color: white;
+          font-weight: 600;
+        }
+        .chain .arrow {
+          font-size: 12px;
+          color: var(--ink);
+          opacity: .55;
+          letter-spacing: .01em;
+        }
+        .chain .arrow::before { content: "→  "; }
+
+        /* Calculator */
+        .calc {
+          background: var(--bg);
+          border: 1px solid var(--rule);
+          border-radius: 12px;
+          padding: 28px;
+          margin-top: 16px;
+        }
+        .calc-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr 1fr;
+          gap: 16px;
+          margin-bottom: 28px;
+        }
+        .calc-grid label {
+          display: block;
+          font-size: 13px;
+          color: var(--muted);
+          margin-bottom: 6px;
+          font-weight: 600;
+        }
+        .calc-grid select, .calc-grid input {
+          width: 100%;
+          height: 48px;
+          padding: 0 14px;
+          font-size: 16px;
+          line-height: 1.5;
+          border: 1px solid var(--rule);
+          border-radius: 8px;
+          background: white;
+          font-family: Poppins, Arial, sans-serif;
+          color: var(--ink);
+        }
+        .calc-grid .notional-row {
+          display: flex;
+          gap: 8px;
+        }
+        .calc-grid .notional-row input { flex: 1; }
+        .calc-grid .notional-row select { width: 96px; padding: 0 10px; }
+        .calc-grid select:focus, .calc-grid input:focus {
+          outline: none;
+          border-color: var(--primary-1);
+        }
+        .seg {
+          display: flex;
+          height: 48px;
+          border: 1px solid var(--rule);
+          border-radius: 8px;
+          overflow: hidden;
+          background: white;
+        }
+        .seg button {
+          flex: 1;
+          height: 100%;
+          padding: 0 8px;
+          border: 0;
+          background: white;
+          font-size: 14px;
+          line-height: 1;
+          cursor: pointer;
+          font-family: Poppins, Arial, sans-serif;
+          font-weight: 500;
+          color: var(--ink);
+          transition: background-color .15s;
+        }
+        .seg button:hover { background: var(--gray-3); }
+        .seg button.active { background: var(--primary-1); color: white; }
+        .calc-summary {
+          font-size: 18px;
+          line-height: 1.5;
+          margin: 8px 0 18px;
+          color: var(--ink);
+        }
+        .calc-summary strong { font-weight: 700; }
+        table.breakdown {
+          width: 100%;
+          border-collapse: collapse;
+          font-size: 14px;
+        }
+        table.breakdown td {
+          padding: 12px 0;
+          border-bottom: 1px solid var(--rule);
+        }
+        table.breakdown td:nth-child(2),
+        table.breakdown td:nth-child(3) {
+          text-align: right;
+          font-variant-numeric: tabular-nums;
+        }
+        .reg-fee-note {
+          margin-top: 18px;
+          font-size: 13px;
+          line-height: 1.5;
+          color: var(--ink);
+        }
+        .reg-fee-note .item { display: block; margin-top: 4px; }
+        .reg-fee-note .item:first-child { margin-top: 0; }
+        .reg-fee-note .name { font-weight: 600; }
+        table.breakdown tr.total td {
+          font-weight: 700;
+          border-bottom: none;
+          border-top: 2px solid var(--ink);
+          padding-top: 14px;
+        }
+
+        /* FAQ */
+        .faq details {
+          border-bottom: 1px solid var(--rule);
+          padding: 20px 0;
+        }
+        .faq summary {
+          cursor: pointer;
+          font-weight: 600;
+          font-size: 16px;
+          list-style: none;
+          display: flex;
+          justify-content: space-between;
+          color: var(--ink);
+        }
+        .faq summary::after { content: "+"; color: var(--muted); font-weight: 400; }
+        .faq details[open] summary::after { content: "−"; }
+        .faq p { color: var(--ink); margin: 12px 0 0; line-height: 1.5; }
+
+        /* Disclaimer + CTA placeholders */
+        .disclaimer { font-size: 13px; color: var(--muted); line-height: 1.5; }
+        .placeholder-block {
+          background: var(--gray-3);
+          border: 1px dashed var(--gray-2);
+          border-radius: 12px;
+          padding: 32px 24px;
+          text-align: center;
+          color: var(--muted);
+          font-size: 14px;
+        }
+        .placeholder-block strong {
+          display: block;
+          color: var(--ink);
+          font-size: 18px;
+          line-height: 24px;
+          font-family: 'Source Serif Pro', 'Times New Roman', serif;
+          font-weight: 700;
+          margin-bottom: 4px;
+        }
+
+        /* Wireframe banner */
+        .wireframe-banner {
+          background: var(--warning);
+          color: white;
+          padding: 8px 16px;
+          font-size: 12px;
+          font-weight: 500;
+          text-align: center;
+          letter-spacing: 0.01em;
+        }
+
+        /* Brand breakpoint mirror: tablet ≤991, mobile-landscape ≤767 */
+        @media (max-width: 991px) {
+          h1 { font-size: 44px; line-height: 46px; }
+          h2 { font-size: 32px; line-height: 36px; }
+          h3 { font-size: 22px; line-height: 28px; }
+        }
+        @media (max-width: 767px) {
+          section { padding: 48px 0; }
+          h1 { font-size: 32px; line-height: 36px; }
+          h2 { font-size: 28px; line-height: 32px; }
+          .tagline { font-size: 16px; line-height: 24px; }
+          .calc-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="wireframe-banner">
+    Wireframe—visual treatment illustrative; final styles inherit Webflow utility classes.
+    &nbsp;·&nbsp; <span id="data-source-indicator">Data: loading…</span>
+</div>
+
+<!-- §1-2: nav + hero scaffold (real components reused from Webflow) -->
+
+<section>
+    <div class="container">
+        <p class="eyebrow">Tools</p>
+        <h1>Order execution costs</h1>
+        <p class="tagline">Empirical bps cost by category and order strategy—measured on live Interactive Brokers
+            fills, not lifted from fee tables.</p>
+        <div class="intro">
+            <p>Most cost calculators copy fee schedules. We measure the actual fills: every column below comes from
+                running real orders against an Interactive Brokers account at small notional and recording the slippage
+                to mid, the time to fill, and the all-in commission.</p>
+            <p>The result: a category × strategy matrix that, paired with our recommended execution policy, tells you
+                which order type to use for what. Limit at mid for wide spreads, the IB midprice algo for tight ones,
+                plain market for FX (and as a fallback when the chain doesn't fill). The numbers are bps of notional,
+                signed (positive = cost, negative = price improvement).</p>
+            <p>We re-run the harness on a regular cadence and update the matrix. Live data is the honest baseline;
+                paper-account data fills cells where live samples are still thin. The page shows the best-available
+                number per cell.</p>
+        </div>
+    </div>
+</section>
+
+<!-- §8: Matrix -->
+
+<section>
+    <div class="container">
+        <h2>The matrix</h2>
+        <p class="sub-instr">Median slippage versus the midpoint at the moment the order is <strong>submitted</strong>
+            (T0), in bps of notional. The cell with the ✓ marker is the strategy our recommended execution policy picks
+            for that category (see below).</p>
+        <div class="matrix-wrap">
+            <table class="matrix" id="matrix">
+                <thead>
+                <tr>
+                    <th>Category</th>
+                    <th title="Limit order priced at the midpoint at submit (T0), with retries">Limit at mid</th>
+                    <th title="IB's hosted MIDPRICE algorithm—internally waits and fills at the prevailing midpoint">IB
+                        midprice algo
+                    </th>
+                    <th title="IB's Adaptive algorithm at Normal priority">IB adaptive algo</th>
+                    <th title="Plain market order—fills immediately at the touch">Plain market</th>
+                </tr>
+                </thead>
+                <tbody><!-- rows injected by JS --></tbody>
+            </table>
+        </div>
+        <p class="footnote">
+            <strong>What's measured:</strong> the difference between the final fill price and the
+            <strong>midpoint snapped at submit time (T0)</strong>, signed so that <strong>positive = cost</strong>
+            (you paid worse than mid) and <strong>negative = price improvement</strong>. Note that the reference is
+            the mid <em>at submit</em>, not the mid at fill—algorithms like the IB midprice algo target the prevailing
+            mid at fill time, so market drift between submit and fill shows up here as slippage even when the algo did
+            its job.
+            <br><br>
+            <strong>n</strong> is the count of FILLED trials in the slice. Color saturation is row-relative—each
+            category is shaded against its own widest cell. <em>low n</em> means the order type works for that category
+            but we don't yet have enough fills to call it confidently. <strong>not supported</strong> means the order
+            type isn't available for that category (e.g. the IB midprice algo on futures, the adaptive algo on FX/CFD).
+            <a href="#methodology">How we measure →</a>
+        </p>
+    </div>
+</section>
+
+<!-- §9: Order types -->
+
+<section>
+    <div class="container">
+        <h2>The four order types</h2>
+        <p class="sub-instr">Each strategy trades off price against certainty of execution differently. The matrix above
+            measures all four on every category; our recommended policy picks one per spread band (see below).</p>
+        <p><strong>Limit at mid.</strong> A limit order priced at the calculated midpoint of the bid/ask at submit. If
+            it doesn't fill, the order is cancelled and re-submitted—up to four attempts on a 60-second budget. Best
+            for wide spreads where waiting beats paying the spread; can fail to fill in fast-moving markets if the mid
+            runs away from the price.</p>
+        <p><strong>IB midprice algo.</strong> Interactive Brokers' hosted MIDPRICE algorithm. The algo waits internally
+            (up to ~30 seconds) and fills at the prevailing midpoint at the moment of execution. Less control than the
+            manual limit, but lower workload. Available on US equities and equity ETFs; not supported on futures, cash
+            FX, or CFDs.</p>
+        <p><strong>IB adaptive algo.</strong> IB's Adaptive algorithm at Normal priority. Sends a marketable limit that
+            adjusts toward the touch as needed—smarter routing than plain market with active venue selection.
+            Available on most asset classes but not on cash FX or CFDs.</p>
+        <p><strong>Plain market.</strong> A standard market order. Fills immediately at the touch—no price guarantee
+            but no waiting either. Universal—works on any instrument we trade.</p>
+    </div>
+</section>
+
+<!-- §10: Trading policy -->
+
+<section>
+    <div class="container">
+        <h2>Our recommended execution policy</h2>
+        <p class="sub-instr">Picking the cheapest cell from the matrix per instrument isn't robust—per-cell sample
+            sizes are thin and the cheapest-measured strategy can flip with one more sweep. The honest move is to
+            classify each order by its spread band at submit and follow a chain. Below is the policy we recommend.</p>
+        <p><strong>Tight spread (≤ 3 bps).</strong> IB midprice algo first. If it doesn't fill within 35 seconds, drop
+            to IB adaptive; if that doesn't fill, plain market. When the spread is small, retry overhead isn't worth
+            it—let the algo find liquidity quickly and accept near-mid execution.</p>
+        <div class="chain">
+            <span class="step primary">IB midprice</span>
+            <span class="arrow">35s timeout</span>
+            <span class="step">IB adaptive</span>
+            <span class="arrow">no fill</span>
+            <span class="step">Plain market</span>
+        </div>
+        <p><strong>Wide spread (> 10 bps).</strong> Limit at mid with up to four retries on a 60-second budget. Worth
+            waiting—the spread cost dwarfs the option-value of patience. If the retries exhaust without filling, the
+            chain drops to adaptive and then market.</p>
+        <div class="chain">
+            <span class="step primary">Limit at mid</span>
+            <span class="arrow">4 × 15s · no fill</span>
+            <span class="step">IB adaptive</span>
+            <span class="arrow">no fill</span>
+            <span class="step">Plain market</span>
+        </div>
+        <p><strong>Grey zone (3-10 bps).</strong> Same chain as tight. The right strategy in this band is sensitive to
+            the exact spread and remains a calibration question as more data accumulates.</p>
+        <div class="chain">
+            <span class="step primary">IB midprice</span>
+            <span class="arrow">35s timeout</span>
+            <span class="step">IB adaptive</span>
+            <span class="arrow">no fill</span>
+            <span class="step">Plain market</span>
+        </div>
+        <p><strong>FX—plain market by design.</strong> EURUSD spreads run around 0.17 bps. At that level the
+            difference between picking the optimal strategy and just hitting the touch is in the noise—the delta is
+            negligible. The midprice and adaptive algos aren't supported on cash FX anyway, so the realistic choice is
+            limit-at-mid or plain market. Plain market wins on simplicity, and the cost difference is immaterial.</p>
+        <div class="chain">
+            <span class="step primary">Plain market</span>
+        </div>
+        <p><strong>No live quote.</strong> Plain market. When the order arrives without a usable bid/ask (off-hours
+            quote, instrument not supported), there's no way to price a limit—the chain falls straight through to
+            market.</p>
+        <div class="chain">
+            <span class="step primary">Plain market</span>
+        </div>
+    </div>
+</section>
+
+<!-- §11: Calculator -->
+
+<section>
+    <div class="container">
+        <h2>What does my trade cost?</h2>
+        <p class="sub-instr">Plug in your trade. The calculator applies our recommended execution policy to both
+            legs of a round-trip.</p>
+
+        <div class="calc">
+            <div class="calc-grid">
+                <div>
+                    <label for="ac">Category</label>
+                    <select id="ac"></select>
+                </div>
+                <div>
+                    <label for="notional">Notional</label>
+                    <div class="notional-row">
+                        <input id="notional" min="100" step="1000" type="number" value="10000">
+                        <select aria-label="Display currency" id="ccy"></select>
+                    </div>
+                </div>
+                <div>
+                    <label>Side</label>
+                    <div class="seg" id="side">
+                        <button data-side="BUY">Buy</button>
+                        <button data-side="SELL">Sell</button>
+                        <button class="active" data-side="BOTH">Round-trip</button>
+                    </div>
+                </div>
+            </div>
+
+            <p class="calc-summary" id="calc-summary"></p>
+            <table class="breakdown" id="breakdown">
+                <tbody></tbody>
+            </table>
+            <div class="reg-fee-note" id="reg-fee-note"></div>
+        </div>
+    </div>
+</section>
+
+<!-- §10: Methodology snippet -->
+
+<section id="methodology">
+    <div class="container">
+        <h2>How we measure</h2>
+        <p>The numbers above come from running real orders, not from broker fee tables. We submit small orders against
+            an Interactive Brokers account across four strategies—limit-at-mid, IB midprice algo, IB adaptive algo,
+            plain market—and record three things per fill: the slippage versus mid-price at submit time, the time to
+            fill, and the all-in commission.</p>
+        <p>Slippage is signed: positive means you paid worse than mid (cost), negative means you got price improvement.
+            Sample size is shown in each cell so you can judge how thin or fat the data is. Empty cells mean either the
+            strategy isn't supported on that contract type, or live quote data wasn't available at submit time.</p>
+        <p>Where we have enough live-account data we use it. Otherwise we show paper-account data, which is reliable for
+            spread, commission, and fill timing but slightly distorts limit-strategy slippage (paper fills limits at the
+            mid deterministically). The matrix shows the raw measurement, including negative values when our sample
+            captured price improvement. The calculator caps slippage at zero in its total so a forward-looking estimate
+            never promises you'll be paid to trade. The full methodology and the exact harness code are open-source.</p>
+    </div>
+</section>
+
+<!-- §11: Reproduce it -->
+
+<section>
+    <div class="container">
+        <h2>Reproduce it</h2>
+        <p>The harness, the calculator engine, and the static cost tables are all open-source under MIT. Clone the repo,
+            point it at your own Interactive Brokers paper account, and regenerate the matrix in about ten minutes. Each
+            cell here ships with sample size <code>n</code> so you can judge confidence—and verify our numbers against
+            your own runs.</p>
+        <p><a href="https://github.com/pfolio-io/pfolio-execution-quality" id="repo-link">View on GitHub →</a></p>
+    </div>
+</section>
+
+<!-- §12: FAQ -->
+
+<section>
+    <div class="container">
+        <h2>FAQ</h2>
+        <div class="faq">
+            <details>
+                <summary>Why measure trading costs instead of using broker fee tables?</summary>
+                <p>Fee tables only show what the broker charges. They miss the two costs that actually dominate: the
+                    <strong>bid-ask spread</strong> (what market-makers earn, and the largest line on every trade
+                    outside
+                    illiquid names) and the <strong>strategy effect</strong> (a limit at mid can fill at near-zero cost
+                    while a market order pays the full half-spread on the same instrument). Measuring real fills
+                    captures both, on the same contracts under the same market conditions, so you can compare order
+                    types apples-to-apples.</p>
+            </details>
+            <details>
+                <summary>Why do limit orders sometimes show negative cost (price improvement)?</summary>
+                <p>When IB routes a marketable limit to a venue that fills inside the visible bid-ask — IEX D-Peg,
+                    midpoint matches, dark pools — the print comes back at a price better than the NBBO. The negative
+                    bps in the matrix is the size of that improvement. Paper accounts don't simulate this, so it only
+                    shows up on live fills. The matrix reports the raw measurement; the calculator caps slippage at zero
+                    so a forward-looking estimate never promises you'll be paid to trade.</p>
+            </details>
+            <details>
+                <summary>What's the difference between the IB midprice algo and limit at mid?</summary>
+                <p>Both target the mid, but they're managed differently. The <strong>IB midprice algo</strong> is a
+                    server-side algorithm hosted by Interactive Brokers — it waits up to ~30 seconds for liquidity at
+                    the prevailing midpoint and routes opportunistically to dark and midpoint venues. <strong>Limit at
+                        mid</strong> is a plain limit order priced at the midpoint at submit; if it doesn't fill we
+                    cancel
+                    and re-submit, up to four attempts on a 60-second budget. The midprice algo is hands-off and can
+                    capture sub-NBBO routing; limit at mid is more transparent and works on contracts where the algo
+                    isn't supported (futures, FX, CFDs).</p>
+            </details>
+            <details>
+                <summary>Are these numbers good for large-size trades?</summary>
+                <p>No. The harness uses tiny notional — one share, one contract, smallest tradable lot — so book depth,
+                    queue position, and market impact don't show up in the measurement. A small market order clearing
+                    the touch quote behaves very differently from one walking through three price levels. Treat the
+                    matrix as a <strong>floor</strong> on what tight execution can achieve, not a ceiling on what you'll
+                    pay at size.</p>
+            </details>
+            <details>
+                <summary>Which broker did you measure?</summary>
+                <p>Interactive Brokers Pro with tiered commission. Other brokers differ on commission schedule and on
+                    which algorithms they expose. The <strong>spread numbers should generalize</strong> — they reflect
+                    the public market, not IB's pricing — but commission, regulatory passthrough, and exact slippage
+                    will shift. The harness is open source under MIT; run it against your own broker to recalibrate.</p>
+            </details>
+            <details>
+                <summary>How often does this update?</summary>
+                <p>Whenever we run a new sweep — manual cadence, typically every few weeks during US market hours. The
+                    matrix snapshot you're looking at is rendered directly from the data in the public repo, so the
+                    page refreshes automatically when we push new results. If you want fresher numbers on your
+                    schedule, clone the repo and run the harness against your own paper or live account; one full sweep
+                    takes about ten minutes.</p>
+            </details>
+        </div>
+    </div>
+</section>
+
+<!-- §13: Cross-links -->
+
+<section>
+    <div class="container">
+        <h2>More tools</h2>
+        <p>Browse all of pfolio's free tools at <a href="/tools">/tools</a>. Coming soon: a parametric trading-cost
+            calculator with custom broker config, and a side-by-side broker comparison.</p>
+    </div>
+</section>
+
+<!-- §14: Disclaimer -->
+
+<section>
+    <div class="container">
+        <h3>Disclaimer</h3>
+        <p class="disclaimer">This page is an order-execution cost reference. It is not legal, tax, or financial advice.
+            Investments involve risks, including the potential loss of capital. Numbers are based on small-notional
+            measurement and may not reflect real-world cost at meaningful size. This tool is provided by pfolio GmbH, a
+            financial service provider under the Swiss Financial Services Act (FinSA), registered in Switzerland.
+            Advertising under Art. 68 FinSA. For information only.</p>
+    </div>
+</section>
+
+<!-- §15-17: CTA + footer placeholders (reused Webflow components) -->
+
+<section>
+    <div class="container">
+        <div class="placeholder-block">
+            <strong>"Why pfolio?" 3-column block</strong>
+            Reused from existing Webflow component (Performance / Flexibility / Efficiency)
+        </div>
+        <div class="placeholder-block" style="margin-top: 16px;">
+            <strong>"Get started now" CTA</strong>
+            Reused from existing Webflow component
+        </div>
+        <div class="placeholder-block" style="margin-top: 16px;">
+            <strong>Footer</strong>
+            Reused from existing Webflow component
+        </div>
+    </div>
+</section>
+
+<script>
+    /* ───────────────────────────────────────────────────────
+       Data layer—fetches from the public repo via jsDelivr.
+       Falls back to inline data if the repo doesn't exist yet
+       or the network is unavailable, so the wireframe always
+       renders. Once the public repo is live, the fetch
+       succeeds and real data flows automatically.
+
+       Production URL pattern (locked 2026-05-07):
+         https://cdn.jsdelivr.net/gh/pfolio-io/pfolio-execution-quality@main/...
+       ─────────────────────────────────────────────────────── */
+    const REPO_BASE_RESULTS = "https://cdn.jsdelivr.net/gh/pfolio-io/pfolio-execution-quality@main/order-execution/quality/results";
+    const REPO_BASE_TABLES  = "https://cdn.jsdelivr.net/gh/pfolio-io/pfolio-execution-quality@main/order-execution/quality/cost_tables";
+    const MATRIX_URLS = {
+      paper: `${REPO_BASE_RESULTS}/matrix_paper.csv`,
+      live:  `${REPO_BASE_RESULTS}/matrix_live.csv`,
+    };
+    const TABLE_URLS = {
+      broker:   `${REPO_BASE_TABLES}/broker_ibkr.json`,
+      reg_fees: `${REPO_BASE_TABLES}/reg_fees.json`,
+      fx_rates: `${REPO_BASE_TABLES}/fx_rates.json`,
+    };
+
+    /* Inline fallback data—snapshot from 2026-05-11 (post the targeted
+       VIX+PRIM live sweep). Used only if the jsDelivr fetch fails. Refresh
+       this when the matrix CSVs in the public repo move materially.
+       parseCsv() trims per-line whitespace so the source-file indentation
+       below doesn't break the bucket-key lookup. */
+    const FALLBACK_MATRIX_PAPER = `bucket,LMT_MID_median_bps,LMT_MID_n,MIDPRICE_NATIVE_median_bps,MIDPRICE_NATIVE_n,MKT_ADAPTIVE_median_bps,MKT_ADAPTIVE_n,MKT_RAW_median_bps,MKT_RAW_n
+    FUT_CFE,12.8041,17,,0,-0.0328,4,12.8041,63
+    FUT_CME,-0.1721,29,,0,-0.1715,16,0.1718,87
+    FX_IDEALPRO,-0.2136,27,,0,,0,0.0427,63
+    US_ETF,0.0000,71,-0.4623,61,0.3456,46,0.4607,265
+    US_SMALL_CAP_STK,-2.3468,10,-2.4459,3,0.1229,6,19.8574,59
+    US_STK,-0.1785,26,-0.5312,26,-0.1783,16,0.8804,95`;
+
+    const FALLBACK_MATRIX_LIVE = `bucket,LMT_MID_median_bps,LMT_MID_n,MIDPRICE_NATIVE_median_bps,MIDPRICE_NATIVE_n,MKT_ADAPTIVE_median_bps,MKT_ADAPTIVE_n,MKT_RAW_median_bps,MKT_RAW_n
+    FUT_CFE,12.9366,3,,0,12.8700,1,12.9366,8
+    FUT_CME,-0.1708,4,,0,-0.0005,4,0.1714,16
+    FX_IDEALPRO,0.0216,4,,0,,0,0.0641,12
+    US_ETF,-0.0770,4,-0.1376,4,-0.1035,4,0.2070,20
+    US_SMALL_CAP_STK,-2.1799,3,-2.8019,4,-0.9211,3,6.8274,14
+    US_STK,-0.1762,4,-2.0278,4,-0.7928,4,-0.2642,20`;
+
+    let MATRIX_PAPER = parseCsv(FALLBACK_MATRIX_PAPER);
+    let MATRIX_LIVE = parseCsv(FALLBACK_MATRIX_LIVE);
+    let DATA_SOURCE = "fallback"; /* "live" once jsDelivr fetch succeeds */
+
+    async function loadFromRepo() {
+      try {
+        const [paperRes, liveRes, brokerRes, regRes, fxRes] = await Promise.all([
+          fetch(MATRIX_URLS.paper,    { mode: "cors" }),
+          fetch(MATRIX_URLS.live,     { mode: "cors" }),
+          fetch(TABLE_URLS.broker,    { mode: "cors" }),
+          fetch(TABLE_URLS.reg_fees,  { mode: "cors" }),
+          fetch(TABLE_URLS.fx_rates,  { mode: "cors" }),
+        ]);
+        if (!paperRes.ok || !liveRes.ok || !brokerRes.ok || !regRes.ok || !fxRes.ok) throw new Error("non-200");
+        const [paperText, liveText, brokerJson, regJson, fxJson] = await Promise.all([
+          paperRes.text(), liveRes.text(), brokerRes.json(), regRes.json(), fxRes.json(),
+        ]);
+        MATRIX_PAPER = parseCsv(paperText);
+        MATRIX_LIVE  = parseCsv(liveText);
+        BROKER       = brokerJson;
+        REG_FEES     = regJson;
+        /* fx_rates.json carries meta keys (_doc, _as_of) — strip to numbers only */
+        FX_RATES = Object.fromEntries(
+          Object.entries(fxJson).filter(([k, v]) => !k.startsWith("_") && typeof v === "number")
+        );
+        DATA_SOURCE = "repo";
+        rebuildIndices();
+        renderMatrix();
+        renderCalc();
+        updateDataSourceIndicator();
+      } catch (err) {
+        console.warn("[order-execution-costs] using inline fallback data—", err.message);
+        /* leave the inline fallback in place; banner already shows it */
+      }
+    }
+
+    function updateDataSourceIndicator() {
+      const el = document.getElementById("data-source-indicator");
+      if (!el) return;
+      if (DATA_SOURCE === "repo") {
+        el.textContent = "Data: live from public repo";
+        el.style.color = "#1a7a4a";
+      } else {
+        el.textContent = "Data: inline fallback (public repo not yet reachable)";
+        el.style.color = "#b35b00";
+      }
+    }
+
+    const STRATEGIES = ["LMT_MID", "MIDPRICE_NATIVE", "MKT_ADAPTIVE", "MKT_RAW"];
+    const STRATEGY_LABEL = {
+      LMT_MID: "Limit at mid",
+      MIDPRICE_NATIVE: "IB midprice algo",
+      MKT_ADAPTIVE: "IB adaptive algo",
+      MKT_RAW: "Plain market",
+    };
+    const BUCKET_LABEL = {
+      US_STK: "US large-cap stock",
+      US_ETF: "US ETF",
+      US_SMALL_CAP_STK: "US small-cap stock",
+      FUT_CME: "US futures (high liquidity)",
+      FUT_CFE: "US futures (low liquidity)",
+      FX_IDEALPRO: "FX",
+    };
+    const BUCKET_ORDER = ["US_STK", "US_ETF", "US_SMALL_CAP_STK", "FUT_CME", "FUT_CFE", "FX_IDEALPRO"];
+
+    /* Policy pick per bucket. Mirrors section "Our recommended execution
+       policy": derived from each bucket's typical spread band and per-step
+       eligibility. Used by both the matrix ✓ marker and the calculator;
+       round-trip applies the same pick to BOTH legs (no auto-flatten asymmetry). */
+    const POLICY_PICK_BY_BUCKET = {
+      US_STK:           "MIDPRICE_NATIVE",  // tight band; midprice eligible
+      US_ETF:           "MIDPRICE_NATIVE",  // tight band; midprice eligible
+      US_SMALL_CAP_STK: "LMT_MID",          // wide band
+      FUT_CME:          "MKT_ADAPTIVE",     // tight band; midprice ineligible → adaptive
+      FUT_CFE:          "LMT_MID",          // wide band
+      FX_IDEALPRO:      "MKT_RAW",          // FX-by-design: spread is negligible, simplicity wins
+    };
+
+    /* Cost-model tables. Inline fallbacks are snapshots of
+       order-execution/quality/cost_tables/{broker_ibkr,reg_fees}.json from
+       2026-05-04; loadFromRepo() replaces them with the live JSON once the
+       public repo is reachable via jsDelivr. */
+    const FALLBACK_BROKER = {
+      US_STK:           { currency: "USD", per_share: 0.0035, min_per_order: 0.35, max_pct_of_notional: 0.01 },
+      US_ETF:           { currency: "USD", per_share: 0.0035, min_per_order: 0.35, max_pct_of_notional: 0.01 },
+      US_SMALL_CAP_STK: { currency: "USD", per_share: 0.0035, min_per_order: 0.35, max_pct_of_notional: 0.01 },
+      EU_STK_XETRA:     { currency: "EUR", per_value_bps: 5.0, min_per_order: 1.25, max_per_order: 99.0 },
+      EU_STK_LSE:       { currency: "GBP", per_value_bps: 5.0, min_per_order: 1.0,  max_pct_of_notional: 0.0149 },
+      EU_STK_SIX:       { currency: "CHF", per_value_bps: 6.0, min_per_order: 1.5,  max_per_order: 99.0 },
+      FX_IDEALPRO:      { currency: "USD", per_value_bps: 0.20, min_per_order: 2.0 },
+      CFD_FX:           { currency: "USD", per_value_bps: 0.20, min_per_order: 2.0 },
+      CFD_INDEX:        { currency: "USD", per_value_bps: 0.50, min_per_order: 1.0 },
+      FUT_CME:          { currency: "USD", per_contract: 0.85, exchange_fee_per_contract: 1.40 },
+      FUT_CME_MICRO:    { currency: "USD", per_contract: 0.25, exchange_fee_per_contract: 0.35 },
+      FUT_CFE:          { currency: "USD", per_contract: 1.50, exchange_fee_per_contract: 0.85 },
+      FUT_NYBOT:        { currency: "USD", per_contract: 1.50, exchange_fee_per_contract: 0.72 },
+      FUT_EUREX:        { currency: "EUR", per_contract: 1.0,  exchange_fee_per_contract: 0.50 },
+    };
+    const FALLBACK_REG_FEES = {
+      US_STK: {
+        currency: "USD",
+        sells_only: {
+          sec_fee_per_million: 27.80,
+          finra_taf_per_share: 0.000166,
+          finra_taf_max_per_trade: 8.30,
+        },
+        buys_only: {},
+        both_sides: {},
+      },
+      US_ETF:           { currency: "USD", _inherits: "US_STK" },
+      US_SMALL_CAP_STK: { currency: "USD", _inherits: "US_STK" },
+      FUT_CME:          { currency: "USD", both_sides: { nfa_fee_per_contract: 0.02 } },
+      FUT_CFE:          { currency: "USD", _inherits: "FUT_CME" },
+      FUT_NYBOT:        { currency: "USD", _inherits: "FUT_CME" },
+      FX_IDEALPRO:      { currency: "USD", buys_only: {}, sells_only: {}, both_sides: {} },
+      CFD_FX:           { currency: "USD", _inherits: "FX_IDEALPRO" },
+      EU_STK_XETRA:     { currency: "EUR", both_sides: { clearing_fee_per_trade: 0.10 } },
+      EU_STK_LSE:       { currency: "GBP", buys_only: { ptm_levy_per_trade: 1.00 }, both_sides: {} },
+      EU_STK_SIX:       { currency: "CHF", both_sides: {} },
+    };
+    let BROKER   = FALLBACK_BROKER;
+    let REG_FEES = FALLBACK_REG_FEES;
+
+    /* USD-anchored FX rates: each value is the USD price of 1 unit of that
+       currency. Inline fallback is a 2026-05-04 snapshot from the public
+       repo's cost_tables/fx_rates.json; loadFromRepo() replaces it with the
+       live JSON when reachable. */
+    const FALLBACK_FX_RATES = {
+      USD: 1.0,
+      AUD: 0.66,
+      CAD: 0.74,
+      CHF: 1.20,
+      EUR: 1.10,
+      GBP: 1.27,
+      JPY: 0.0066,
+      NZD: 0.61,
+    };
+    let FX_RATES = FALLBACK_FX_RATES;
+    /* User-facing currency dropdown — matches the pfolio app's currency_list.
+       Order chosen to match the app's display order. */
+    const FX_CURRENCY_ORDER = ["USD", "AUD", "CAD", "CHF", "EUR", "GBP", "JPY", "NZD"];
+
+    /* Reference price + contract multiplier per V1 bucket. The form takes
+       notional only; we synthesize qty = notional / (price × multiplier) so
+       IBKR's per-share / per-contract rules and the $0.35 minimum behave
+       correctly (e.g. $100 of US_STK gets the $0.35 floor, not 0.0035 × 0.5
+       shares). Placeholders calibrated to typical 2026-Q2 retail trade
+       sizes; V2 will let users pick a ticker and use real prices. */
+    const BUCKET_PRICE_MULT = {
+      US_STK:           { price: 200,   multiplier: 1 },
+      US_ETF:           { price: 400,   multiplier: 1 },
+      US_SMALL_CAP_STK: { price: 30,    multiplier: 1 },
+      FUT_CME:          { price: 5000,  multiplier: 50 },   // ES default: 1 contract ≈ $250k
+      FUT_CFE:          { price: 20,    multiplier: 1000 }, // VX default:  1 contract ≈ $20k
+      FX_IDEALPRO:      { price: 1,     multiplier: 1 },    // notional ≈ qty; commission rule is per_value_bps
+    };
+
+    /* ───────────────── helpers ───────────────── */
+
+    function parseCsv(text) {
+      /* Trim each line so the inline template-literal fallback (which
+         carries source-file indentation) parses correctly, not just CDN
+         responses with no leading whitespace. */
+      const lines = text.trim().split("\n").map(l => l.trim()).filter(Boolean);
+      const header = lines[0].split(",");
+      return lines.slice(1).map(line => {
+        const cells = line.split(",");
+        const row = {};
+        header.forEach((h, i) => {
+          const v = cells[i];
+          row[h] = (v === "" || v === undefined) ? null : (isNaN(+v) ? v : +v);
+        });
+        return row;
+      });
+    }
+
+    function indexByBucket(rows) {
+      const out = {};
+      rows.forEach(r => out[r.bucket] = r);
+      return out;
+    }
+    let PAPER_BY_BUCKET = indexByBucket(MATRIX_PAPER);
+    let LIVE_BY_BUCKET = indexByBucket(MATRIX_LIVE);
+    function rebuildIndices() {
+      PAPER_BY_BUCKET = indexByBucket(MATRIX_PAPER);
+      LIVE_BY_BUCKET = indexByBucket(MATRIX_LIVE);
+    }
+
+    /* Best-guess value (Rule B + outlier guard):
+       - Live overrules paper whenever n_live >= 2 and the value isn't a
+         clear outlier vs paper (|live - paper| < OUTLIER_BPS when n_live < 5).
+       - n_live >= 5 always wins (no outlier check needed at that sample size).
+       - n_live = 1 is too thin to display as a median—falls through.
+       - Falls back to paper at n >= 10. Otherwise null (renders as low-n
+         or "not supported"). */
+    const OUTLIER_BPS = 50;
+    function bestGuess(bucket, strategy) {
+      const live = LIVE_BY_BUCKET[bucket];
+      const paper = PAPER_BY_BUCKET[bucket];
+      const liveBps = live ? live[strategy + "_median_bps"] : null;
+      const liveN = live ? live[strategy + "_n"] : 0;
+      const paperBps = paper ? paper[strategy + "_median_bps"] : null;
+      const paperN = paper ? paper[strategy + "_n"] : 0;
+
+      let liveTrusted = false;
+      if (liveBps !== null) {
+        if (liveN >= 5) {
+          liveTrusted = true;
+        } else if (liveN >= 2) {
+          const paperKnown = paperBps !== null && paperN >= 10;
+          liveTrusted = !paperKnown || Math.abs(liveBps - paperBps) < OUTLIER_BPS;
+        }
+      }
+      if (liveTrusted) {
+        return { bps: liveBps, n: liveN, source: "live" };
+      }
+      if (paperBps !== null && paperN >= 10) {
+        return { bps: paperBps, n: paperN, source: "paper" };
+      }
+      return null;
+    }
+
+    function colorForBps(bps, cap) {
+      if (bps === null || bps === undefined) return "transparent";
+      /* Row-wise saturation: caller passes the row's max-abs bps (with a
+         1 bps floor so noise rows don't all saturate to full color). */
+      const c = Math.max(cap || 0, 1);
+      const t = Math.min(Math.abs(bps) / c, 1);
+      if (bps < 0) {
+        /* improvement → brand teal: #d6f4f1 → #00bfb2 (--primary-2) */
+        const r = Math.round(214 + (0   - 214) * t);
+        const g = Math.round(244 + (191 - 244) * t);
+        const b = Math.round(241 + (178 - 241) * t);
+        return `rgba(${r},${g},${b},${0.35 + 0.5 * t})`;
+      } else {
+        /* cost → brand coral: #fbe1df → #ef6f6c (--primary-4) */
+        const r = Math.round(251 + (239 - 251) * t);
+        const g = Math.round(225 + (111 - 225) * t);
+        const b = Math.round(223 + (108 - 223) * t);
+        return `rgba(${r},${g},${b},${0.35 + 0.5 * t})`;
+      }
+    }
+
+    /* Three-state classification per (bucket × strategy):
+       - "ok":         data meets threshold; render value.
+       - "thin":       some samples exist but below threshold; render muted "low n".
+       - "ineligible": no samples in either store; render "—" (order type not
+                       supported on this category). */
+    function cellState(bucket, strategy) {
+      const cell = bestGuess(bucket, strategy);
+      if (cell) return { state: "ok", cell };
+      const live = LIVE_BY_BUCKET[bucket];
+      const paper = PAPER_BY_BUCKET[bucket];
+      const liveN = (live && live[strategy + "_n"]) || 0;
+      const paperN = (paper && paper[strategy + "_n"]) || 0;
+      if (liveN === 0 && paperN === 0) return { state: "ineligible" };
+      return { state: "thin", liveN, paperN };
+    }
+
+    /* ───────────────── cost engine ─────────────────
+       Browser port of calculator/cost_model.py. All amounts returned in the
+       broker rule's native currency; V1 buckets are USD-only so the FX
+       layer is a no-op. Add it back when EU_* buckets land in the dropdown. */
+
+    function resolveInherited(node, table) {
+      if (!node || !node._inherits) return Object.assign({}, node || {});
+      const parent = resolveInherited(table[node._inherits], table);
+      for (const [k, v] of Object.entries(node)) {
+        if (k !== "_inherits") parent[k] = v;
+      }
+      return parent;
+    }
+
+    function applyFeeRule(name, value, qty, notionalNative) {
+      if (typeof value !== "number") return 0;
+      if (name.startsWith("_") || name.endsWith("_doc") || name.endsWith("_max_per_trade")) return 0;
+      if (name.endsWith("_per_million")) return value * notionalNative / 1e6;
+      if (name.endsWith("_per_share"))   return value * qty;
+      if (name.endsWith("_per_trade"))   return value;
+      if (name.endsWith("_per_contract"))return value * qty;
+      return 0;
+    }
+
+    /* Commission for ONE leg, in native currency. Mirrors cost_model.py::_commission. */
+    function commissionForLeg(bucket, notional) {
+      const rule = BROKER[bucket];
+      if (!rule || typeof rule !== "object") return 0;
+      const px = BUCKET_PRICE_MULT[bucket] || { price: 1, multiplier: 1 };
+      const qty = notional / (px.price * px.multiplier);
+      let raw = 0;
+      if (rule.per_share != null) {
+        raw = qty * rule.per_share;
+      } else if (rule.per_value_bps != null) {
+        raw = notional * rule.per_value_bps / 1e4;
+      } else if (rule.per_contract != null) {
+        raw = qty * rule.per_contract + qty * (rule.exchange_fee_per_contract || 0);
+      } else {
+        return 0;
+      }
+      if (rule.min_per_order != null)       raw = Math.max(raw, rule.min_per_order);
+      if (rule.max_pct_of_notional != null) raw = Math.min(raw, notional * rule.max_pct_of_notional);
+      if (rule.max_per_order != null)       raw = Math.min(raw, rule.max_per_order);
+      return raw;
+    }
+
+    /* Reg-fee lines for ONE leg on the given side. Returns array of
+       {key, native_amount} so callers can convert to bps and label them. */
+    function regFeesForLeg(bucket, notional, side) {
+      const node = REG_FEES[bucket];
+      if (!node) return [];
+      const rule = resolveInherited(node, REG_FEES);
+      const px = BUCKET_PRICE_MULT[bucket] || { price: 1, multiplier: 1 };
+      const qty = notional / (px.price * px.multiplier);
+      const sideKey = side === "BUY" ? "buys_only" : "sells_only";
+      const buckets = [rule[sideKey] || {}, rule.both_sides || {}];
+      const lines = [];
+      for (const b of buckets) {
+        for (const [k, v] of Object.entries(b)) {
+          const amt = applyFeeRule(k, v, qty, notional);
+          if (amt > 0) lines.push({ key: k, amount: amt });
+        }
+      }
+      return lines;
+    }
+
+    /* Pretty label for a reg-fee key, e.g. sec_fee_per_million → "SEC fee". */
+    function regFeeLabel(key) {
+      const root = regFeeRoot(key);
+      const map = {
+        sec: "SEC fee",
+        finra_taf: "FINRA TAF",
+        nfa: "NFA fee",
+        clearing: "Clearing fee",
+        ptm_levy: "PTM levy",
+      };
+      return map[root] || root.replace(/_/g, " ");
+    }
+
+    function regFeeRoot(key) {
+      return key
+        .replace(/_per_million$/, "")
+        .replace(/_per_share$/, "")
+        .replace(/_per_trade$/, "")
+        .replace(/_per_contract$/, "")
+        .replace(/_fee$/, "");
+    }
+
+    /* One-line explanation per reg-fee root key. Rendered below the
+       breakdown only for fees that actually appear in the trade. */
+    const REG_FEE_EXPLANATION = {
+      sec:       "Securities and Exchange Commission fee on US equity sales (~USD 27.80 per USD 1M of principal sold).",
+      finra_taf: "FINRA Trading Activity Fee on US equity sales (~USD 0.000166 per share, capped at USD 8.30 per trade).",
+      nfa:       "National Futures Association fee on US futures, both sides (USD 0.02 per contract).",
+      clearing:  "Exchange clearing fee, charged per trade.",
+      ptm_levy:  "UK Panel on Takeovers and Mergers levy (GBP 1.00 per trade on UK equities at GBP 10,000 notional or above).",
+    };
+
+    /* ───────────────── matrix render ───────────────── */
+
+    function renderMatrix() {
+      const tbody = document.querySelector("#matrix tbody");
+      tbody.innerHTML = "";
+      BUCKET_ORDER.forEach(bucket => {
+        const tr = document.createElement("tr");
+        const tdBucket = document.createElement("td");
+        tdBucket.textContent = BUCKET_LABEL[bucket];
+        tr.appendChild(tdBucket);
+        /* ✓ marker tracks the production policy pick, not cheapest-measured.
+           Matches section "Our recommended execution policy" + the calculator. */
+        const rec = POLICY_PICK_BY_BUCKET[bucket];
+
+        /* Row-wise color cap = max absolute bps of cells that meet threshold.
+           Falls back to 1 bps minimum so near-noise rows don't all saturate. */
+        const states = STRATEGIES.map(s => cellState(bucket, s));
+        const rowCap = Math.max(
+          ...states.filter(s => s.state === "ok").map(s => Math.abs(s.cell.bps)),
+          0,
+        );
+
+        STRATEGIES.forEach((strategy, i) => {
+          const td = document.createElement("td");
+          td.className = "cell";
+          const s = states[i];
+          if (s.state === "ok") {
+            td.style.backgroundColor = colorForBps(s.cell.bps, rowCap);
+            const sign = s.cell.bps > 0 ? "+" : "";
+            td.innerHTML = `<div class="bps">${sign}${s.cell.bps.toFixed(2)} bps</div><div class="n" title="Source: ${s.cell.source} fills">n=${s.cell.n}</div>`;
+            if (strategy === rec) td.classList.add("recommended");
+          } else if (s.state === "thin") {
+            td.classList.add("empty", "thin");
+            const total = (s.paperN || 0) + (s.liveN || 0);
+            td.innerHTML = `<div class="bps">low n</div><div class="n" title="Strategy is supported but neither dataset clears its threshold (live ≥ 2 with outlier guard, or paper ≥ 10). Combined n=${total}.">below threshold</div>`;
+          } else {
+            td.classList.add("empty");
+            td.innerHTML = `<div class="bps">—</div><div class="n" title="Order type not available for this category (eligibility or no live quote)">not supported</div>`;
+          }
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+    }
+
+    /* ───────────────── calculator ───────────────── */
+
+    const CALC_STATE_STORAGE_KEY = "oec_calc_v1";
+    let calcState = { bucket: "US_STK", notional: 10000, side: "BOTH", currency: "USD" };
+
+    function loadCalcStateFromStorage() {
+      try {
+        const raw = localStorage.getItem(CALC_STATE_STORAGE_KEY);
+        if (!raw) return;
+        const saved = JSON.parse(raw);
+        if (saved && typeof saved === "object") {
+          if (BUCKET_LABEL[saved.bucket]) calcState.bucket = saved.bucket;
+          if (Number.isFinite(saved.notional) && saved.notional > 0) calcState.notional = saved.notional;
+          if (["BUY", "SELL", "BOTH"].includes(saved.side)) calcState.side = saved.side;
+          if (FX_RATES[saved.currency]) calcState.currency = saved.currency;
+        }
+      } catch { /* ignore corrupt state */ }
+    }
+
+    function saveCalcStateToStorage() {
+      try { localStorage.setItem(CALC_STATE_STORAGE_KEY, JSON.stringify(calcState)); } catch { /* ignore */ }
+    }
+
+    function populateAssetClassDropdown() {
+      const sel = document.getElementById("ac");
+      BUCKET_ORDER.forEach(b => {
+        const opt = document.createElement("option");
+        opt.value = b;
+        opt.textContent = BUCKET_LABEL[b];
+        sel.appendChild(opt);
+      });
+      sel.value = calcState.bucket;
+    }
+
+    function populateCurrencyDropdown() {
+      const sel = document.getElementById("ccy");
+      sel.innerHTML = "";
+      FX_CURRENCY_ORDER.forEach(c => {
+        if (!FX_RATES[c]) return;
+        const opt = document.createElement("option");
+        opt.value = c;
+        opt.textContent = c;
+        sel.appendChild(opt);
+      });
+      sel.value = calcState.currency;
+    }
+
+    function bindCalcInputs() {
+      document.getElementById("ac").addEventListener("change", e => {
+        calcState.bucket = e.target.value; saveCalcStateToStorage(); renderCalc();
+      });
+      document.getElementById("notional").addEventListener("input", e => {
+        calcState.notional = +e.target.value || 0; saveCalcStateToStorage(); renderCalc();
+      });
+      document.getElementById("ccy").addEventListener("change", e => {
+        const newCcy = e.target.value;
+        const oldCcy = calcState.currency;
+        if (newCcy !== oldCcy) {
+          /* Preserve the USD-equivalent trade size — otherwise switching
+             from USD 10,000 to JPY would leave the user at JPY 10,000
+             (≈ USD 66), where the commission floor dominates and the
+             bps blows up. Round to a clean magnitude so the field looks
+             tidy. */
+          const oldRate = FX_RATES[oldCcy] || 1;
+          const newRate = FX_RATES[newCcy] || 1;
+          const usdEquiv = calcState.notional * oldRate;
+          calcState.notional = roundNotionalToClean(usdEquiv / newRate);
+          document.getElementById("notional").value = calcState.notional;
+        }
+        calcState.currency = newCcy;
+        saveCalcStateToStorage();
+        renderCalc();
+      });
+      document.querySelectorAll("#side button").forEach(btn => {
+        btn.addEventListener("click", () => {
+          document.querySelectorAll("#side button").forEach(b => b.classList.remove("active"));
+          btn.classList.add("active");
+          calcState.side = btn.dataset.side;
+          saveCalcStateToStorage();
+          renderCalc();
+        });
+      });
+      /* Restore side selection from state */
+      document.querySelectorAll("#side button").forEach(b => {
+        b.classList.toggle("active", b.dataset.side === calcState.side);
+      });
+      document.getElementById("notional").value = calcState.notional;
+    }
+
+    function renderCalc() {
+      const { bucket, notional, side, currency } = calcState;
+      const bucketLabel = BUCKET_LABEL[bucket];
+      const rec = POLICY_PICK_BY_BUCKET[bucket] || "MKT_RAW";
+      const recCell = bestGuess(bucket, rec);
+
+      const sides = side === "BOTH" ? ["BUY", "SELL"] : [side];
+      const legs = sides.length;
+      const safeNotional = notional > 0 ? notional : 0;
+
+      /* Internal math is anchored in USD (every V1 broker rule is USD-denominated).
+         The notional input is in the user's display currency; convert to USD for
+         commission / reg-fee math, then derive bps. Bps is currency-invariant, so
+         the display amount = bps × notional_in_display_currency / 1e4. */
+      const usdPerDisplayUnit = FX_RATES[currency] || 1;
+      const safeNotionalUsd = safeNotional * usdPerDisplayUnit;
+
+      const rows = [];
+
+      /* 1. Slippage = realized execution cost vs mid_t0, summed across legs.
+            slip_vs_mid_t0_bps already captures the half-spread that MKT pays
+            and the (≈0) cost of LMT/MIDPRICE filled at mid; a separate "spread
+            cost" line would double-count. The total is capped at zero so the
+            calculator doesn't imply guaranteed price improvement from low-n
+            negative measurements (the matrix shows the raw value). */
+      let slippageNote = null;
+      if (recCell) {
+        const rawBps = recCell.bps * legs;
+        const cappedBps = Math.max(0, rawBps);
+        const legSuffix = legs > 1 ? `, ×${legs} legs` : "";
+        rows.push({
+          label: `Slippage (${STRATEGY_LABEL[rec]}${legSuffix})`,
+          bps: cappedBps,
+        });
+        if (rawBps < 0) {
+          slippageNote = `Measured slippage on ${bucketLabel.toLowerCase()} with ` +
+            `${STRATEGY_LABEL[rec]} is ${rawBps.toFixed(2)} bps across our ${legs}-leg sample ` +
+            `(price improvement). The calculator caps slippage at zero so the total isn't a ` +
+            `promise of negative cost — the matrix above shows the raw measurement.`;
+        }
+      }
+
+      /* 2. Commission (broker rule × legs). Rule is in rule.currency = USD for V1. */
+      if (safeNotionalUsd > 0) {
+        const commPerLegUsd = commissionForLeg(bucket, safeNotionalUsd);
+        const commTotalUsd = commPerLegUsd * legs;
+        if (commTotalUsd > 0) {
+          rows.push({
+            label: `Commission${legs > 1 ? ` (×${legs} legs)` : ""}`,
+            bps: (commTotalUsd / safeNotionalUsd) * 1e4,
+          });
+        }
+      }
+
+      /* 3. Regulatory fees (one combined line). Side-aware. */
+      const appearingFeeRoots = [];
+      if (safeNotionalUsd > 0) {
+        const feeAmounts = {};
+        for (const s of sides) {
+          for (const { key, amount } of regFeesForLeg(bucket, safeNotionalUsd, s)) {
+            feeAmounts[key] = (feeAmounts[key] || 0) + amount;
+          }
+        }
+        const feeKeys = Object.keys(feeAmounts);
+        if (feeKeys.length > 0) {
+          const totalNativeUsd = feeKeys.reduce((sum, k) => sum + feeAmounts[k], 0);
+          const tags = [...new Set(feeKeys.map(regFeeLabel))];
+          rows.push({
+            label: `Regulatory fees (${tags.join(", ")})`,
+            bps: (totalNativeUsd / safeNotionalUsd) * 1e4,
+          });
+          /* Track unique roots so the explanations below render only
+             for fees that actually appear in this trade. */
+          for (const root of new Set(feeKeys.map(regFeeRoot))) {
+            appearingFeeRoots.push(root);
+          }
+        }
+      }
+
+      const totalBps = rows.reduce((sum, r) => sum + r.bps, 0);
+      const totalDisplay = (totalBps / 1e4) * notional;
+
+      /* summary */
+      const sideLabel = side === "BOTH" ? "Round-trip" : (side === "BUY" ? "Buy" : "Sell");
+      document.getElementById("calc-summary").innerHTML =
+        `${sideLabel} cost on ${formatCcy(notional)} of ${bucketLabel}: ` +
+        `<strong>${totalBps >= 0 ? "+" : ""}${totalBps.toFixed(2)} bps</strong> ` +
+        `(≈ ${formatCcy(totalDisplay)})`;
+
+      /* breakdown */
+      const tbody = document.querySelector("#breakdown tbody");
+      tbody.innerHTML = "";
+      rows.forEach(r => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td>${r.label}</td><td>${fmtBps(r.bps)}</td><td>${formatCcy((r.bps / 1e4) * notional)}</td>`;
+        tbody.appendChild(tr);
+      });
+      const trTotal = document.createElement("tr");
+      trTotal.className = "total";
+      trTotal.innerHTML = `<td>Total</td><td>${fmtBps(totalBps)}</td><td>${formatCcy(totalDisplay)}</td>`;
+      tbody.appendChild(trTotal);
+
+      /* Footnotes — slippage cap (when raw was negative) + reg-fee explanations. */
+      const noteEl = document.getElementById("reg-fee-note");
+      noteEl.innerHTML = "";
+      if (slippageNote) {
+        const item = document.createElement("span");
+        item.className = "item";
+        item.innerHTML = `<span class="name">Note on slippage.</span> ${slippageNote}`;
+        noteEl.appendChild(item);
+      }
+      for (const root of appearingFeeRoots) {
+        const explanation = REG_FEE_EXPLANATION[root];
+        if (!explanation) continue;
+        const name = regFeeLabel(root);
+        const item = document.createElement("span");
+        item.className = "item";
+        item.innerHTML = `<span class="name">${name}.</span> ${explanation}`;
+        noteEl.appendChild(item);
+      }
+    }
+
+    function fmtBps(b) { return (b >= 0 ? "+" : "") + b.toFixed(2) + " bps"; }
+
+    /* Round a notional to a tidy magnitude — 100k step for ≥1M, 10k step
+       for ≥100k, 1k step for ≥10k, 100 step for ≥1k, etc. Keeps the
+       auto-scaled value in the input field looking deliberate. */
+    function roundNotionalToClean(amount) {
+      const abs = Math.abs(amount);
+      if (abs <= 0) return 0;
+      let step;
+      if (abs >= 1e6)      step = 1e5;
+      else if (abs >= 1e5) step = 1e4;
+      else if (abs >= 1e4) step = 1e3;
+      else if (abs >= 1e3) step = 100;
+      else if (abs >= 100) step = 10;
+      else                 step = 1;
+      return Math.max(step, Math.round(amount / step) * step);
+    }
+    /* Currency format: always ISO 4217 code (USD/EUR/CHF/…), never symbol.
+       Matches pfolio app convention. Format: "USD 10,000.00" or "-USD 0.36". */
+    function formatCcy(amount) {
+      const sign = amount < 0 ? "-" : "";
+      const abs = Math.abs(amount).toLocaleString("en-US", { maximumFractionDigits: 2, minimumFractionDigits: 2 });
+      return `${sign}${calcState.currency} ${abs}`;
+    }
+
+    /* ───────────────── boot ───────────────── */
+
+    loadCalcStateFromStorage();
+    renderMatrix();
+    populateAssetClassDropdown();
+    populateCurrencyDropdown();
+    bindCalcInputs();
+    renderCalc();
+    updateDataSourceIndicator();
+    loadFromRepo(); /* fire-and-forget; renders again with fresh data on success */
+</script>
+</body>
+</html>
