@@ -621,7 +621,7 @@ function renderCalc() {
       slippageNote = `Measured slippage on ${bucketLabel.toLowerCase()} with ` +
         `${STRATEGY_LABEL[rec]} is ${rawBps.toFixed(2)} bps across our ${legs}-leg sample ` +
         `(price improvement). The calculator caps slippage at zero so the total isn't a ` +
-        `promise of negative cost — the matrix above shows the raw measurement.`;
+        `promise of negative cost—the matrix above shows the raw measurement.`;
     }
   }
 
@@ -773,7 +773,7 @@ const OEC_STYLES = `
 
 /* ─── Calculator ─── */
 .oec-tool .oec-calc {
-  background: var(--oec-bg);
+  background: white;
   border: 1px solid var(--oec-rule);
   border-radius: 12px;
   padding: 28px;

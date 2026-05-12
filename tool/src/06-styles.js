@@ -70,7 +70,7 @@ const OEC_STYLES = `
 
 /* ─── Calculator ─── */
 .oec-tool .oec-calc {
-  background: var(--oec-bg);
+  background: white;
   border: 1px solid var(--oec-rule);
   border-radius: 12px;
   padding: 28px;
