@@ -1,21 +1,25 @@
 # Order-execution quality study + trading-cost calculator
 
-Two paired packages:
+Three paired packages:
 
 - **[`order-execution/quality/`](order-execution/quality/)**—a repeatable
   test harness that submits four order strategies across a curated set of
   Interactive Brokers instruments and records execution-quality metrics
   (slippage vs. mid, time-to-fill, commissions). Outputs parquet/CSV trial
   rows and a Markdown report.
-- **[`calculator/`](calculator/)**—a UI-agnostic engine that turns
+- **[`calculator/`](calculator/)**—a UI-agnostic Python engine that turns
   `(asset_class, qty, price, side)` into a bps-of-notional cost breakdown.
   Pulls empirical spread + slippage from the harness's matrix CSV and falls
   back to static lookup tables for commissions, regulatory fees, taxes,
   and FX.
+- **[`tool/`](tool/)**—the browser bundle that powers
+  <https://pfolio.io/tools/order-execution-costs>. Renders the matrix and
+  a JS port of the calculator, fetching matrix CSVs + cost tables from
+  this repo via jsDelivr.
 
-The harness produces the empirical evidence; the calculator consumes it.
-[`METHODOLOGY.md`](METHODOLOGY.md) explains the cost model and the
-caveats you should keep in mind.
+The harness produces the empirical evidence; the calculator and the browser
+tool consume it. [`METHODOLOGY.md`](METHODOLOGY.md) explains the cost model
+and the caveats you should keep in mind.
 
 ## Quick start
 
@@ -62,8 +66,8 @@ python -m quality.analyze --mode paper --export-matrix-csv \
 │   ├── quote_snapshot.py      shared: snap a one-shot bid/ask + slippage math
 │   ├── contract_helpers.py    shared: contract qualification + tick size
 │   └── quality/               the harness package (runner, analyze, results, …)
-├── calculator/                cost-model engine + CLI
-├── quality/cost_tables/       static lookup tables (broker, reg fees, tax, FX, buckets)
+├── calculator/                cost-model engine + CLI (Python)
+├── tool/                      browser bundle (matrix + calculator UI)
 ├── METHODOLOGY.md             cost decomposition + caveats
 └── requirements.txt
 ```

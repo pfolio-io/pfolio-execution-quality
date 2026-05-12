@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>pfolio-oec — local test harness</title>
+  <link href="https://fonts.googleapis.com" rel="preconnect">
+  <link crossorigin href="https://fonts.gstatic.com" rel="preconnect">
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Source+Serif+Pro:wght@700&display=swap" rel="stylesheet">
+  <style>
+    body { margin: 0; font-family: Poppins, Arial, sans-serif; color: #1f2f36; }
+    .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px; }
+    h1, h2 { font-family: 'Source Serif Pro', serif; }
+    h1 { font-size: 40px; margin: 0 0 8px; }
+    h2 { font-size: 28px; margin: 56px 0 16px; }
+    .lead { color: #5a6b73; margin: 0 0 24px; }
+    .note { background: #fff8e1; border-left: 4px solid #faa307; padding: 12px 16px; margin: 24px 0; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>pfolio-oec — local test harness</h1>
+    <p class="lead">Loads <code>../dist/pfolio-oec.js</code> and mounts both components into the placeholder divs below.</p>
+    <p class="note">First load uses the inline fallback snapshot. After a successful jsDelivr fetch from pfolio-execution-quality@main, components re-render with the live matrix CSVs and cost tables. Check the browser console for fallback warnings.</p>
+
+    <h2>The matrix</h2>
+    <div id="oec-matrix"></div>
+
+    <h2>What does my trade cost?</h2>
+    <div id="oec-calc"></div>
+  </div>
+
+  <script src="../dist/pfolio-oec.js"></script>
+  <script>pfolioOEC.autoMount();</script>
+</body>
+</html>
