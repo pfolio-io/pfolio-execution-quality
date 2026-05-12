@@ -620,7 +620,7 @@ function renderCalc() {
     if (rawBps < 0) {
       slippageNote = `Measured slippage on ${bucketLabel.toLowerCase()} with ` +
         `${STRATEGY_LABEL[rec]} is ${rawBps.toFixed(2)} bps across our ${legs}-leg sample ` +
-        `(price improvement). The calculator caps slippage at zero so the total isn't a ` +
+        `(price improvement). The calculator caps slippage at zero so the total is not a ` +
         `promise of negative cost—the matrix above shows the raw measurement.`;
     }
   }
