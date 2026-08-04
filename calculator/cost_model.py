@@ -67,6 +67,15 @@ class CostLine:
     source: str
     side: str = ""  # which leg this charge applies to (entry, exit, both)
     note: str = ""
+    #: True when this line is a PLACEHOLDER: the component is real, we have no
+    #: measurement of it, and the 0.00 is an absence rather than a value.
+    #:
+    #: ⚑ Before this flag existed the two were indistinguishable in the output.
+    #: `US_STK` with `LMT_MID` prints `0.00` because the measured median is
+    #: ~0; `EU_STK_LSE` printed `0.00` because nothing has ever traded on the
+    #: LSE through this harness. Same number, same column, same TOTAL — and only
+    #: the `source` string, which no total reads, told them apart.
+    unmeasured: bool = False
 
 
 @dataclass
@@ -85,6 +94,23 @@ class CostBreakdown:
             return float("nan")
         return self.total_value_base_ccy / self.notional_base_ccy * 1e4
 
+    @property
+    def unmeasured_components(self) -> list[str]:
+        """Labels of the lines that are placeholders, not measurements."""
+        return [l.label for l in self.lines if l.unmeasured]
+
+    @property
+    def is_complete(self) -> bool:
+        """Is every component in this total actually measured?
+
+        ⚑ **The total's arithmetic is deliberately unchanged** — a placeholder
+        contributes 0 exactly as it did before. Changing the number would be a
+        silent semantic change of its own, and the defect was never the
+        arithmetic: it was that an incomplete total presented as a complete one.
+        This is the flag that says so; the caller decides what to do about it.
+        """
+        return not any(l.unmeasured for l in self.lines)
+
     def render(self) -> str:
         """Human-readable breakdown table."""
         if not self.lines:
@@ -100,11 +126,24 @@ class CostBreakdown:
                 f"{l.value_base_ccy:>12.4f}  {l.bps_of_notional:>8.2f}  {l.source}"
             )
         rows.append("-" * (max_label + 2 + 12 + 2 + 8 + 2 + 6 + 30))
+        label = "TOTAL" if self.is_complete else "PARTIAL TOTAL"
         rows.append(
-            f"{'TOTAL'.ljust(max_label)}  "
+            f"{label.ljust(max_label)}  "
             f"{self.total_value_base_ccy:>12.4f}  {self.total_bps:>8.2f}  "
             f"({self.input.base_currency} on {self.notional_base_ccy:,.2f} notional)"
         )
+        if not self.is_complete:
+            rows.append("")
+            rows.append(
+                "⚑ INCOMPLETE — the following components are UNMEASURED and enter "
+                "the total as zero:"
+            )
+            for label in self.unmeasured_components:
+                rows.append(f"    · {label}")
+            rows.append(
+                "  This total is a floor, not a cost. Run the harness on this asset "
+                "class before quoting it."
+            )
         return "\n".join(rows)
 
 
@@ -363,14 +402,22 @@ def _slippage_cost(
             inp.asset_class, strategy, mode=harness_mode,
         )
         if slip_bps is None:
+            state = harness_data.measurement_state(inp.asset_class, mode=harness_mode)
+            reason = {
+                "undeclared": "asset class is not in asset_class_buckets.json",
+                "unmeasured": "declared, but the harness has never traded it",
+            }.get(state, "no rows for this class × strategy")
             return CostLine(
                 label=f"slippage [{leg_label}, {strategy}]",
                 value_base_ccy=0.0,
                 bps_of_notional=0.0,
-                source=f"no harness({harness_mode}) slip data for "
-                       f"{inp.asset_class}×{strategy}",
+                source=f"UNMEASURED — {reason} "
+                       f"({inp.asset_class}×{strategy}, harness {harness_mode})",
                 side=leg_label,
                 note="placeholder—needs live or more paper data",
+                # The flag, not the note, is what the total reads. A note is a
+                # string nobody sums.
+                unmeasured=True,
             )
         cov = harness_data.coverage_by_strategy(
             inp.asset_class, strategy, mode=harness_mode,

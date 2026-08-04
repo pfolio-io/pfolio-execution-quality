@@ -99,13 +99,63 @@ ALL_STRATEGIES = ("MIDPRICE_NATIVE", "LMT_MID", "MKT_ADAPTIVE", "MKT_RAW")
 TIER1 = ("AAPL", "SPY", "ES", "EURUSD")
 TIER2 = ("LQD", "EFA", "VIX", "CFD_USD_CHF")
 TIER3 = ("DX", "VIX_FAR", "SMALL_CAP")
+
+# European venues. A separate tier rather than an addition to tier 2, because
+# they are the only cells that need European market data and a European trading
+# permission, and a run that lacks either should be able to skip them by name.
+TIER_EU = ("EU_XETRA", "EU_LSE", "EU_SIX")
+
 TIERS = {
     "tier1": TIER1,
     "tier2": TIER2,
     "tier3": TIER3,
-    "all": TIER1 + TIER2 + TIER3,
+    "eu": TIER_EU,
+    "all": TIER1 + TIER2 + TIER3 + TIER_EU,
 }
-KNOWN_SYMBOLS = TIER1 + TIER2 + TIER3
+KNOWN_SYMBOLS = TIER1 + TIER2 + TIER3 + TIER_EU
+
+# ---------------------------------------------------------------------------
+# European instruments — resolved by ISIN, never by a venue ticker
+# ---------------------------------------------------------------------------
+# `broker_ibkr.json` has carried EU_STK_XETRA / EU_STK_LSE / EU_STK_SIX
+# commission rules since 2026-05-04, and `reg_fees.json` and `tax_rules.json`
+# carry the PTM levy and the stamp duties. Nothing has ever traded on any of the
+# three, so the execution term — the one component S1-33 says may never be
+# assumed — has no measurement, and the calculator was returning it as 0.00.
+# These three cells are what makes it measurable.
+#
+# ⚑ RESOLUTION IS BY ISIN, and that is not a stylistic choice. A UCITS ETF is
+# listed under a different local ticker on every venue, and NOTHING in this
+# workspace records which ticker belongs to which venue — the pfolio universe
+# screen's `venues` column is null on all 1,851 rows. A hardcoded ticker here
+# would be a guess, and a wrong guess fails as "contract not found" on a venue
+# we would then wrongly believe we had tested.
+#
+# ⚑ AND THE EXCHANGE IS EXPLICIT, NOT SMART. The bucket these rows land in is
+# defined by venue; a SMART-routed order records `exchange = SMART`, so the row
+# could not say which venue it measured. Measuring the router is not measuring
+# the venue.
+#
+# Candidates are the broadest, largest UCITS equity ETFs in the pfolio universe
+# screen, taken from `pfolio-apps/pfolio/research/universe-screen/data/
+# instruments.json` (issuer feed, iShares CH screener) rather than from memory.
+# They are tried in order and the first that IBKR can qualify on the venue wins;
+# which one that is, is recorded per trial row, so the report says what it
+# actually traded.
+EU_ISIN_CANDIDATES = (
+    ("IE00B4L5Y983", "iShares Core MSCI World UCITS ETF"),      # ~USD 144bn
+    ("IE00B5BMR087", "iShares Core S&P 500 UCITS ETF"),         # ~USD 151bn
+    ("IE00BKM4GZ66", "iShares Core MSCI EM IMI UCITS ETF"),     # ~USD 41bn
+)
+
+# IBKR venue codes and the currency each venue's line is expected in. The
+# currency is NOT asserted — IBKR reports what the listing actually is, and the
+# bucket map matches on that. It is recorded here so a surprise is visible.
+EU_VENUES = {
+    "EU_XETRA": {"exchange": "IBIS", "expect_currency": "EUR", "label": "XETRA"},
+    "EU_LSE": {"exchange": "LSE", "expect_currency": "USD", "label": "LSE"},
+    "EU_SIX": {"exchange": "EBS", "expect_currency": "CHF", "label": "SIX"},
+}
 
 # Tier-3 small-cap default. The spec leaves the small-cap "TBD"—swap
 # this constant if the chosen ticker becomes illiquid or delists.
@@ -117,6 +167,13 @@ DEFAULT_QTY = {
     "AAPL": 1.0, "SPY": 1.0, "ES": 1.0, "EURUSD": 20000.0,
     "LQD": 1.0, "EFA": 1.0, "VIX": 1.0, "CFD_USD_CHF": 1000.0,
     "DX": 1.0, "VIX_FAR": 1.0, "SMALL_CAP": 1.0,
+    # One share, like every other equity cell. The European commission rules are
+    # bps-of-value with a per-order MINIMUM (EUR 1.25 / GBP 1.00 / CHF 1.50), so
+    # a one-share order is dominated by that minimum — which is a fact about the
+    # schedule, not a distortion of the measurement: `slip_vs_mid_t0_bps` is the
+    # quantity these cells exist to measure and it is size-independent at this
+    # notional. The commission column is read from the fill either way.
+    "EU_XETRA": 1.0, "EU_LSE": 1.0, "EU_SIX": 1.0,
 }
 
 # Live-mode quantities. IDEALPRO live minimum is typically 25k base for
@@ -162,6 +219,11 @@ async def _resolve_contract(ib: IB, symbol: str) -> Contract:
         return Forex("EURUSD")
     if symbol == "CFD_USD_CHF":
         return CFD("USD", "SMART", "CHF")
+    if symbol in EU_VENUES:
+        venue = EU_VENUES[symbol]
+        return await instruments.resolve_by_isin(
+            ib, EU_ISIN_CANDIDATES, venue["exchange"],
+        )
     raise ValueError(f"unknown symbol {symbol!r}; known: {KNOWN_SYMBOLS}")
 
 
@@ -604,7 +666,9 @@ def _parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--instruments", default="tier1",
-        help="Tier name (tier1) or comma-separated symbols (e.g. ES,EURUSD).",
+        help="Tier name (tier1, tier2, tier3, eu, all) or comma-separated "
+             "symbols (e.g. ES,EURUSD). `eu` is the three European venues and "
+             "needs European market data plus a trading permission.",
     )
     p.add_argument(
         "--strategies", nargs="+", default=list(ALL_STRATEGIES),
@@ -669,6 +733,17 @@ def _preflight_live(symbols: list[str], strategies: list[str], sides: list[str],
     print(f"  qty per cell  : {qty_summary}")
     print(f"  est max comm  : ~${est_max_total:.0f} USD "
           f"(~$3 × 2-leg × {n_cells} cells, before fill-rate discount)")
+    eu = [s for s in symbols if s in EU_VENUES]
+    if eu:
+        # The US cells cost commission and negligible reg fees. The European
+        # ones can attract a transaction TAX, which the estimate above does not
+        # model and which is charged on notional rather than per order — SIX and
+        # the UK both levy, and the exemptions (Irish-domiciled UCITS on the LSE;
+        # the PTM levy's GBP 10k floor) depend on the specific line that
+        # resolves, which is only known after IBKR answers.
+        print(f"  ⚑ EU cells    : {eu} — these venues may levy a TRANSACTION TAX "
+              f"on notional, which the estimate above does NOT include")
+        print("                  (see cost_tables/tax_rules.json and reg_fees.json)")
     print("============================================================")
     print()
 

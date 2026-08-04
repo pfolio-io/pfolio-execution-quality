@@ -44,6 +44,33 @@ cells are recorded as `SKIPPED` (with `skip_reason`) rather than failed.
 | 1    | `AAPL`, `SPY`, `ES` (CME front), `EURUSD`                  |
 | 2    | `LQD`, `EFA`, `VIX` (CFE front), `CFD_USD_CHF`             |
 | 3    | `DX` (NYBOT front), `VIX_FAR` (CFE 2nd-month), `SMALL_CAP` |
+| eu   | `EU_XETRA`, `EU_LSE`, `EU_SIX`                             |
+
+### The European tier (added 2026-08-04)
+
+`broker_ibkr.json` has carried `EU_STK_XETRA`, `EU_STK_LSE` and `EU_STK_SIX`
+commission rules since 2026-05-04, and `reg_fees.json` and `tax_rules.json`
+carry the PTM levy and the two stamp duties. **Nothing had ever traded on any of
+the three**, so the execution term had no measurement — and the calculator
+returned it as `0.00 bps` inside a total that read as complete. These three cells
+are what makes it measurable. They are a separate tier because they are the only
+ones needing European market data and a European trading permission; a run
+without either should be able to skip them by name.
+
+**Resolution is by ISIN, not by ticker.** A UCITS ETF trades under a different
+local ticker on every venue, and nothing here — or in the pfolio universe screen
+these funds came from — records which ticker belongs to which venue. The
+candidates in `EU_ISIN_CANDIDATES` are the largest broad-market UCITS equity ETFs
+in that screen, tried in order; the first IBKR can qualify on the venue wins, and
+which one it was is recorded per trial row.
+
+**The exchange is explicit (`IBIS` / `LSE` / `EBS`), not `SMART`.** A
+SMART-routed order records `exchange = SMART`, and the bucket for these three is
+*defined* by venue — measuring the router is not measuring the venue.
+
+⚑ **Live European runs can attract a transaction tax** (SIX and the UK both
+levy; the exemptions depend on the specific line that resolves). The live
+pre-flight banner says so; the commission estimate does not model it.
 
 `SMALL_CAP` defaults to `PRIM` (Primoris Services). Swap
 `SMALL_CAP_SYMBOL` in `runner.py` if it delists or you want a different
@@ -80,6 +107,9 @@ order-execution/
     metrics.py         # TickRecorder/VWAP (harness-only) + re-exports of the
                        # shared shapes for backward-compatible imports
     results.py         # parquet/csv append + canonical schema
+    buckets.py         # asset-class selectors — the ONE reader of
+                       # cost_tables/asset_class_buckets.json, shared with
+                       # calculator/harness_data.py
     analyze.py         # post-hoc aggregation → REPORT.md, --export-matrix-csv
     results/           # gitignored except .gitkeep
       trials_paper.parquet

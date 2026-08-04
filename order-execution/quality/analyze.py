@@ -17,12 +17,13 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import fnmatch
 import json
 from pathlib import Path
 from typing import Any, Optional
 
 import pandas as pd
+
+from quality import buckets
 
 RESULTS_DIR = Path(__file__).parent / "results"
 COST_TABLES_DIR = Path(__file__).parent / "cost_tables"
@@ -112,38 +113,13 @@ def _apply_slice(
     return df, "all rows"
 
 
-def _instrument_key(df: pd.DataFrame) -> pd.Series:
-    """Stable instrument identifier including expiry for futures."""
-    expiry = df["expiry"].fillna("").astype(str)
-    return df["symbol"].astype(str) + df["secType"].apply(
-        lambda s: f"/{s}" if s else ""
-    ) + expiry.apply(lambda e: f"/{e}" if e else "")
-
-
-def _load_bucket_map() -> dict[str, list[str]]:
-    """Read calculator asset-class → harness instrument-key patterns from
-    `cost_tables/asset_class_buckets.json`. Strips meta keys (those starting
-    with '_'). Returns empty dict if file missing or malformed."""
-    try:
-        raw = json.loads(BUCKETS_PATH.read_text())
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-    return {k: v for k, v in raw.items()
-            if not k.startswith("_") and isinstance(v, list)}
-
-
-def _bucket_for(inst_key: str, bucket_map: dict[str, list[str]]) -> Optional[str]:
-    """Map a harness instrument key (e.g. 'ES/FUT/20260618') to a calculator
-    bucket (e.g. 'FUT_CME'). Patterns may contain '*' wildcards (matched
-    via fnmatch). Returns None if no bucket matches."""
-    for bucket, patterns in bucket_map.items():
-        for pat in patterns:
-            if "*" in pat:
-                if fnmatch.fnmatch(inst_key, pat):
-                    return bucket
-            elif inst_key == pat:
-                return bucket
-    return None
+# `_instrument_key`, the bucket map reader and the matcher used to live here and
+# a second copy of each lived in `calculator/harness_data.py`. They are now in
+# `quality/buckets.py`, imported by both: two hand-maintained copies of a matcher
+# that decides which rows back a published median is a drift that would not
+# raise, it would silently empty a bucket. These aliases keep the local names.
+_instrument_key = buckets.instrument_key
+_load_bucket_map = buckets.load_bucket_map
 
 
 def bucket_strategy_matrix(df: pd.DataFrame) -> pd.DataFrame:
@@ -167,11 +143,29 @@ def bucket_strategy_matrix(df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
 
     fills["inst_key"] = _instrument_key(fills)
-    fills["bucket"] = fills["inst_key"].apply(lambda k: _bucket_for(k, bucket_map))
+    fills["bucket"] = buckets.bucket_series(fills, bucket_map)
+
+    # A row that satisfies two selectors is silently resolved by file order, and
+    # the row would land in the wrong venue's bucket without anything raising.
+    # Loud is the only safe setting for something that moves a published median.
+    collisions = buckets.check_ambiguity(fills, bucket_map)
+    if collisions:
+        print(f"[matrix] ⚑ AMBIGUOUS bucket membership, resolved by file order: {collisions}")
 
     unmapped = fills[fills["bucket"].isna()]["inst_key"].unique()
     if len(unmapped):
         print(f"[matrix] dropping unmapped instruments: {sorted(unmapped)}")
+
+    # Declared but unmeasured classes are reported by name. Measured against
+    # `fills`, so this means "no FILLED row carrying a slippage measurement" —
+    # which is the condition the cost model cares about, and is broader than "no
+    # trial ever ran" (FUT_NYBOT has trials and no usable VWAP-side data).
+    # On 2026-08-04 the three EU venues are here because nothing has ever traded
+    # them: they exist in `broker_ibkr.json` and now in the bucket map, and the
+    # harness had no European instrument until this change set.
+    absent = buckets.unmeasured_classes(fills, bucket_map)
+    if absent:
+        print(f"[matrix] declared but UNMEASURED (no FILLED row with slippage): {sorted(absent)}")
 
     fills = fills[fills["bucket"].notna()]
     if fills.empty:
