@@ -46,11 +46,28 @@ All in `order-execution/quality/cost_tables/`:
 | `reg_fees.json`            | Per-market regulatory fees (SEC, FINRA, …)    |
 | `tax_rules.json`           | Per-jurisdiction transaction taxes            |
 | `fx_rates.json`            | USD-anchor FX rates                           |
-| `asset_class_buckets.json` | asset_class → harness instrument-key patterns |
+| `asset_class_buckets.json` | asset_class → harness instrument selectors     |
 
 These are version-controlled with the calculator. Refresh from
 authoritative sources (linked in each JSON's `_doc` field) when rates
 drift more than ~5%.
+
+### ⚑ A priced class is not a measured class
+
+`broker_ibkr.json` prices more asset classes than the harness has ever traded.
+Where that is true the execution term has **no measurement**, and until
+2026-08-04 the calculator returned it as `0.00 bps` inside a total that looked
+complete — a European round-trip priced at 61.43 bps with commission, PTM levy
+and stamp duty present and **execution counted as zero**.
+
+The breakdown now says so. `CostLine.unmeasured` marks a placeholder,
+`CostBreakdown.is_complete` is false when one is present, and `render()` prints
+`PARTIAL TOTAL` with the missing components named. The **arithmetic is
+deliberately unchanged** — a placeholder still contributes 0, because the defect
+was never the number, it was an incomplete total presenting as a complete one.
+
+`harness_data.measurement_state(asset_class)` returns `measured` ·
+`unmeasured` · `undeclared`. Check it before quoting a total.
 
 ## Usage
 

@@ -8,3 +8,8 @@ pandas>=2.0                # used by calculator/harness_data.py and analyze.py
 # Optional — used by quality/results.py for parquet output.
 # Without it, the harness falls back to CSV.
 pyarrow>=10.0
+
+# Development only — `python3 -m pytest tests -q` from the repo root. The suite
+# needs no IB connection and no network: it runs against synthetic frames and
+# the committed trial stores.
+pytest>=7.0

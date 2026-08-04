@@ -78,9 +78,22 @@ n=2–10 fills per `(instrument, strategy)` cell in a single sweep). The
 calculator therefore aggregates over **buckets**—coarse asset-class
 groupings—instead of presenting per-instrument winners as gospel.
 Buckets are defined in `quality/cost_tables/asset_class_buckets.json`
-and shared between the harness's matrix export and the calculator. The
+and shared between the harness's matrix export and the calculator —
+literally shared as of 2026-08-04: `quality/buckets.py` is the single
+reader, where each side previously kept its own copy of the matcher. The
 bucket distributions converge to stable medians at the sample sizes
 the harness reaches in a few sessions; per-cell winners do not.
+
+A selector may constrain **venue** as well as symbol. `EU_STK_XETRA`,
+`EU_STK_LSE` and `EU_STK_SIX` are the same `secType` on three different
+exchanges, and the instrument key (`<symbol>/<secType>`) carries no venue;
+they are keyed on the trial row's own `exchange` and `currency` instead.
+
+**A priced bucket is not a measured bucket.** Every European class is
+declared, priced and — as of 2026-08-04 — **unmeasured**: no trial has run
+on any of the three venues. The calculator reports such a total as a
+`PARTIAL TOTAL` and names the missing component rather than presenting a
+zero as a measurement.
 
 ### Commission, regulatory fees, and pass-throughs
 

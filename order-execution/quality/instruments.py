@@ -11,8 +11,11 @@ calendar days (buffer to avoid the active roll window).
 from __future__ import annotations
 
 import datetime as dt
+import logging
 
-from ib_insync import IB, Future
+from ib_insync import IB, Contract, Future
+
+log = logging.getLogger(__name__)
 
 # Buffer in calendar days. Plan says "≥ today + 5 trading days"; 5 calendar
 # days is close enough for monthly/quarterly futures and avoids needing a
@@ -67,3 +70,64 @@ async def resolve_front_month(
             f"≥ today+{buffer_days}d; cannot skip {skip}"
         )
     return candidates[skip][1]
+
+
+async def resolve_by_isin(
+        ib: IB,
+        candidates: "tuple[tuple[str, str], ...]",
+        exchange: str,
+        *,
+        currency: str = "",
+) -> Contract:
+    """First of `candidates` that IBKR can qualify as a stock on `exchange`.
+
+    `candidates` is `((isin, human_name), ...)`, tried in order.
+
+    **Why ISIN and not a ticker.** A UCITS ETF trades under a different local
+    ticker on every venue it is listed on, and nothing in this repo — or in the
+    pfolio universe screen that sourced these funds — records which ticker
+    belongs to which venue. The ISIN is the same everywhere and is what the
+    screen actually carries, so it is the only identifier here that is a fact
+    rather than a guess.
+
+    **Why the exchange is explicit.** The caller is measuring a named venue. A
+    SMART-routed contract reports `exchange = SMART` on every trial row, and the
+    venue-partitioned buckets in `asset_class_buckets.json` would then have
+    nothing to key on. Measuring the router is not measuring the venue.
+
+    `currency` is passed through when the caller knows it and left empty
+    otherwise: IBKR will report the listing's own currency, and the bucket map
+    matches on what came back rather than on what anyone expected.
+
+    Raises ValueError naming every candidate tried, because "no European
+    instrument resolved" is a finding about the account's permissions or market
+    data as often as it is about the contract.
+    """
+    tried = []
+    for isin, name in candidates:
+        template = Contract(
+            secType="STK", exchange=exchange, currency=currency,
+            secIdType="ISIN", secId=isin,
+        )
+        try:
+            details = await ib.reqContractDetailsAsync(template)
+        except Exception as exc:  # noqa: BLE001 — IB raises several unrelated types
+            tried.append(f"{isin} ({name}): {exc!r}")
+            continue
+        if not details:
+            tried.append(f"{isin} ({name}): no contract details on {exchange}")
+            continue
+        contract = details[0].contract
+        log.info(
+            "Resolved %s on %s: symbol=%s currency=%s conId=%s (%s)",
+            isin, exchange, contract.symbol, contract.currency, contract.conId, name,
+        )
+        return contract
+
+    raise ValueError(
+        f"no ISIN candidate resolved on exchange={exchange!r}. Tried:\n  "
+        + "\n  ".join(tried)
+        + "\nThis is as likely to be a missing European market-data subscription "
+          "or trading permission as a wrong contract — check the account before "
+          "changing the candidate list."
+    )

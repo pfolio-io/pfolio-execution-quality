@@ -6,17 +6,17 @@ rates) so the cost model can replace its static fallbacks. Read-only—
 this module never writes to the harness's parquet store.
 
 Asset-class bucketing is config-driven via
-`order-execution/quality/cost_tables/asset_class_buckets.json`, which maps
-calculator keys (e.g. `US_STK`, `FUT_CME`) to lists of harness
-instrument-key patterns. Patterns match `_instrument_key(df)` from
-`quality/analyze.py`—the canonical `<symbol>/<secType>` or
-`<symbol>/<secType>/<expiry>` form.
+`order-execution/quality/cost_tables/asset_class_buckets.json`, and the matcher
+that reads it lives in `quality/buckets.py`, shared with `quality/analyze.py`.
+**This module used to carry its own copy of `_instrument_key` and its own
+matcher.** Two hand-maintained copies of the rule that decides which trials back
+a published median is a drift that never raises — it silently empties a bucket —
+so both consumers now import the one implementation.
 """
 
 from __future__ import annotations
 
-import fnmatch
-import json
+import sys
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional
@@ -27,6 +27,14 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 _QUALITY_DIR = _REPO_ROOT / "order-execution" / "quality"
 _RESULTS_DIR = _QUALITY_DIR / "results"
 _BUCKETS_PATH = _QUALITY_DIR / "cost_tables" / "asset_class_buckets.json"
+
+# `order-execution` has a hyphen and cannot be a package name, so its directory
+# goes on the path and `quality` is imported from it. The coupling is not new:
+# this module already read two files out of that tree.
+if str(_QUALITY_DIR.parent) not in sys.path:
+    sys.path.insert(0, str(_QUALITY_DIR.parent))
+
+from quality import buckets  # noqa: E402
 
 
 def _store_path(mode: str) -> Path:
@@ -50,36 +58,24 @@ def _load_trials(mode: str) -> pd.DataFrame:
 
 
 @lru_cache(maxsize=1)
-def _load_buckets() -> dict[str, list[str]]:
-    """Read the asset_class → patterns map. Excludes `_doc` / `_aliases` keys."""
-    raw = json.loads(_BUCKETS_PATH.read_text())
-    return {
-        k: list(v) for k, v in raw.items()
-        if not k.startswith("_") and isinstance(v, list)
-    }
+def _load_buckets() -> dict[str, buckets.Selector]:
+    """asset_class → Selector. Excludes `_doc` / `_aliases` keys."""
+    return buckets.load_bucket_map(_BUCKETS_PATH)
 
 
-def _instrument_key(df: pd.DataFrame) -> pd.Series:
-    """Mirrors quality/analyze.py::_instrument_key.
-    `<symbol>/<secType>` plus `/<expiry>` for futures."""
-    expiry = df["expiry"].fillna("").astype(str)
-    return (
-            df["symbol"].astype(str)
-            + df["secType"].apply(lambda s: f"/{s}" if s else "")
-            + expiry.apply(lambda e: f"/{e}" if e else "")
-    )
+_instrument_key = buckets.instrument_key
 
 
 def _filter_by_asset_class(df: pd.DataFrame, asset_class: str) -> pd.DataFrame:
-    buckets = _load_buckets()
-    patterns = buckets.get(asset_class)
-    if not patterns:
-        return df.iloc[0:0]
-    keys = _instrument_key(df)
-    mask = pd.Series(False, index=df.index)
-    for pat in patterns:
-        mask = mask | keys.apply(lambda k: fnmatch.fnmatchcase(k, pat))
-    return df[mask]
+    """Rows backing `asset_class`, venue constraints included.
+
+    ⚑ An unknown class and a known-but-unmeasured class both return an empty
+    frame here, and the two are NOT the same thing to a caller — see
+    `is_declared` / `measurement_state`. `EU_STK_LSE` is the second kind: the
+    cost model has a full commission, levy and stamp-duty rule for it and no
+    execution measurement at all.
+    """
+    return buckets.rows_for(df, asset_class, _load_buckets())
 
 
 def median_slip_bps_by_strategy(
@@ -164,3 +160,37 @@ def coverage(asset_class: str, mode: str = "paper") -> dict[str, int]:
 def list_asset_classes() -> list[str]:
     """Return the asset_class keys the bucket map knows about."""
     return list(_load_buckets().keys())
+
+
+def is_declared(asset_class: str) -> bool:
+    """Is this class in the bucket map at all?"""
+    return asset_class in _load_buckets()
+
+
+def measurement_state(asset_class: str, mode: str = "paper") -> str:
+    """`measured` · `unmeasured` · `undeclared`.
+
+    **The distinction this function exists for.** `median_slip_bps_by_strategy`
+    returns `None` for a class with no data and for a class nobody has heard of,
+    and the cost model then emitted a 0.00 bps slippage line for both — which
+    lands in a TOTAL that reads as complete. On 2026-08-04 that is what a
+    European trade got: `EU_STK_LSE` priced a round-trip at 61.43 bps with
+    commission, PTM levy and stamp duty all present and **execution counted as
+    zero**, and the only trace was a `source` string.
+
+    That is an assumed spread arriving by omission, and S1-33 — the workspace's
+    "`cost_tables/` is the only admissible source of execution costs, never
+    assume a spread" — is precisely the rule it walks through. A caller that
+    wants a total it can stand behind checks this first.
+    """
+    if not is_declared(asset_class):
+        return "undeclared"
+    try:
+        df = _load_trials(mode)
+    except FileNotFoundError:
+        return "unmeasured"
+    rows = _filter_by_asset_class(df, asset_class)
+    if rows.empty:
+        return "unmeasured"
+    usable = rows[(rows["status"] == "FILLED") & rows["slip_vs_mid_t0_bps"].notna()]
+    return "measured" if not usable.empty else "unmeasured"
