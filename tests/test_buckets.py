@@ -173,7 +173,7 @@ def test_an_unmeasured_european_total_is_flagged_incomplete():
     ))
     assert not out.is_complete
     assert out.unmeasured_components, "no component was flagged"
-    assert all(l.bps_of_notional == 0.0 for l in out.lines if l.unmeasured)
+    assert all(line.bps_of_notional == 0.0 for line in out.lines if line.unmeasured)
     assert "INCOMPLETE" in out.render()
     assert "PARTIAL TOTAL" in out.render()
 
@@ -196,7 +196,7 @@ def test_a_measured_zero_and_an_unmeasured_zero_are_distinguishable():
         symbol="X", asset_class="EU_STK_LSE", side="BUY", qty=1000, price=7))
     us = cost_model.compute_cost(cost_model.CostInput(
         symbol="AAPL", asset_class="US_STK", side="BUY", qty=100, price=200))
-    eu_slip = [l for l in eu.lines if l.label.startswith("slippage")][0]
-    us_slip = [l for l in us.lines if l.label.startswith("slippage")][0]
+    eu_slip = [line for line in eu.lines if line.label.startswith("slippage")][0]
+    us_slip = [line for line in us.lines if line.label.startswith("slippage")][0]
     assert eu_slip.bps_of_notional == us_slip.bps_of_notional == 0.0
     assert eu_slip.unmeasured and not us_slip.unmeasured
