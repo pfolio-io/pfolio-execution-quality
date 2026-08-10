@@ -137,7 +137,7 @@ KNOWN_SYMBOLS = TIER1 + TIER2 + TIER3 + TIER_EU
 # the venue.
 #
 # Candidates are the broadest, largest UCITS equity ETFs in the pfolio universe
-# screen, taken from `pfolio-apps/pfolio/research/universe-screen/data/
+# screen, taken from `pfolio-apps/pfolio-app/research/universe-screen/data/
 # instruments.json` (issuer feed, iShares CH screener) rather than from memory.
 # They are tried in order and the first that IBKR can qualify on the venue wins;
 # which one that is, is recorded per trial row, so the report says what it
