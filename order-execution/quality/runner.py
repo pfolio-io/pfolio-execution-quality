@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import datetime as dt
+import json
 import math
 import sys
 import uuid
@@ -33,6 +34,7 @@ from pathlib import Path
 from typing import Any
 
 import nest_asyncio
+import pandas as pd
 from ib_insync import CFD, IB, Contract, Forex, Order, Stock, Trade
 
 # Reuse shared primitives. Harness is independent of the production
@@ -46,7 +48,7 @@ from contract_helpers import _get_tick_size, _qualify_contract  # noqa: E402
 
 import eligibility  # noqa: E402
 import order_builders  # noqa: E402
-from quality import instruments, results  # noqa: E402
+from quality import buckets, instruments, results  # noqa: E402
 from quality.metrics import TickRecorder  # noqa: E402
 from quote_snapshot import Quote, slip_vs_mid_bps, snapshot_quote  # noqa: E402
 
@@ -150,12 +152,30 @@ EU_ISIN_CANDIDATES = (
 
 # IBKR venue codes and the currency each venue's line is expected in. The
 # currency is NOT asserted — IBKR reports what the listing actually is, and the
-# bucket map matches on that. It is recorded here so a surprise is visible.
+# bucket map matches on that. It is a resolution *preference* (tried first, then
+# dropped) so repeated sessions land on the same line, and it is recorded here so
+# a surprise is visible.
+#
+# `bucket` is the calculator asset class each venue's trials must land in. It is
+# checked against `asset_class_buckets.json` before the first order rather than
+# discovered at analysis time: a European cell that resolves to the wrong venue
+# still trades, still costs the commission, and then falls out of the matrix as
+# an unmapped instrument with nothing but a printed warning.
 EU_VENUES = {
-    "EU_XETRA": {"exchange": "IBIS", "expect_currency": "EUR", "label": "XETRA"},
-    "EU_LSE": {"exchange": "LSE", "expect_currency": "USD", "label": "LSE"},
-    "EU_SIX": {"exchange": "EBS", "expect_currency": "CHF", "label": "SIX"},
+    "EU_XETRA": {"exchange": "IBIS", "expect_currency": "EUR", "label": "XETRA",
+                 "bucket": "EU_STK_XETRA"},
+    "EU_LSE": {"exchange": "LSE", "expect_currency": "USD", "label": "LSE",
+               "bucket": "EU_STK_LSE"},
+    "EU_SIX": {"exchange": "EBS", "expect_currency": "CHF", "label": "SIX",
+               "bucket": "EU_STK_SIX"},
 }
+
+# European regular trading hours, for the guard below and for the operator.
+# XETRA 09:00–17:30 CET/CEST · SIX 09:00–17:20 · LSE 08:00–16:30 London.
+# Common window: 09:00–17:20 CEST. These venues have no meaningful extended
+# session on UCITS ETF lines, so `--outside-rth` cannot help and can only make an
+# unfilled limit rest for its whole retry budget.
+EU_COMMON_WINDOW_CEST = "09:00–17:20"
 
 # Tier-3 small-cap default. The spec leaves the small-cap "TBD"—swap
 # this constant if the chosen ticker becomes illiquid or delists.
@@ -199,32 +219,80 @@ ROUGH_COMMISSION_USD_PER_FILL = {
 }
 
 
-async def _resolve_contract(ib: IB, symbol: str) -> Contract:
-    """Equities/ETFs use SMART/USD; futures resolve front-month via IB;
-    FX uses IDEALPRO; CFDs use SMART. Tier-3 names follow the same routing
-    with `VIX_FAR` skipping the front contract."""
+async def _resolve_contract(ib: IB, symbol: str) -> tuple[Contract, str | None]:
+    """Resolve one harness symbol to a contract, plus the ISIN it resolved from
+    when resolution went by ISIN (European cells) and `None` otherwise.
+
+    Equities/ETFs use SMART/USD; futures resolve front-month via IB; FX uses
+    IDEALPRO; CFDs use SMART. Tier-3 names follow the same routing with
+    `VIX_FAR` skipping the front contract. The ISIN is returned rather than
+    logged because it is provenance for a published figure: the local ticker
+    differs per venue, so `symbol` alone does not say which fund was measured."""
     if symbol in ("AAPL", "SPY", "LQD", "EFA"):
-        return Stock(symbol, "SMART", "USD")
+        return Stock(symbol, "SMART", "USD"), None
     if symbol == "SMALL_CAP":
-        return Stock(SMALL_CAP_SYMBOL, "SMART", "USD")
+        return Stock(SMALL_CAP_SYMBOL, "SMART", "USD"), None
     if symbol == "ES":
-        return await instruments.resolve_front_month(ib, "ES", "CME")
+        return await instruments.resolve_front_month(ib, "ES", "CME"), None
     if symbol == "VIX":
-        return await instruments.resolve_front_month(ib, "VIX", "CFE")
+        return await instruments.resolve_front_month(ib, "VIX", "CFE"), None
     if symbol == "VIX_FAR":
-        return await instruments.resolve_front_month(ib, "VIX", "CFE", skip=1)
+        return await instruments.resolve_front_month(ib, "VIX", "CFE", skip=1), None
     if symbol == "DX":
-        return await instruments.resolve_front_month(ib, "DX", "NYBOT")
+        return await instruments.resolve_front_month(ib, "DX", "NYBOT"), None
     if symbol == "EURUSD":
-        return Forex("EURUSD")
+        return Forex("EURUSD"), None
     if symbol == "CFD_USD_CHF":
-        return CFD("USD", "SMART", "CHF")
+        return CFD("USD", "SMART", "CHF"), None
     if symbol in EU_VENUES:
         venue = EU_VENUES[symbol]
         return await instruments.resolve_by_isin(
             ib, EU_ISIN_CANDIDATES, venue["exchange"],
+            currency=venue["expect_currency"],
         )
     raise ValueError(f"unknown symbol {symbol!r}; known: {KNOWN_SYMBOLS}")
+
+
+# ---------------------------------------------------------------------------
+# The venue guard
+# ---------------------------------------------------------------------------
+def bucket_of(symbol: str, sec_type: str, exchange: str, currency: str) -> str | None:
+    """Which calculator asset class a contract's trials would land in, or None.
+
+    Asks `quality/buckets.py` — the same reader `analyze.py` uses — so the guard
+    cannot drift from the map it is enforcing. Pure: no IB, no I/O beyond the
+    bucket JSON, which is why it is testable without a broker connection."""
+    row = pd.DataFrame([{
+        "symbol": symbol, "secType": sec_type,
+        "exchange": exchange, "currency": currency, "expiry": None,
+    }])
+    return buckets.bucket_series(row).iloc[0]
+
+
+def venue_guard(symbol: str, contract: Contract) -> str:
+    """`""` when `contract` may be traded for `symbol`, else the reason not to.
+
+    Only European cells are guarded, and only because they are the only ones
+    whose bucket is decided by the *contract* rather than by the ticker. A
+    XETRA cell that resolved onto SMART, or onto the LSE line, would trade
+    happily and then be dropped from the matrix as unmapped — the commission is
+    spent either way, so the check belongs before the order."""
+    venue = EU_VENUES.get(symbol)
+    if venue is None:
+        return ""
+    got = bucket_of(
+        getattr(contract, "symbol", ""), getattr(contract, "secType", ""),
+        getattr(contract, "exchange", ""), getattr(contract, "currency", ""),
+    )
+    if got == venue["bucket"]:
+        return ""
+    return (
+        f"resolved contract lands in bucket {got!r}, expected "
+        f"{venue['bucket']!r} (exchange={contract.exchange!r} "
+        f"currency={contract.currency!r} symbol={contract.symbol!r}). "
+        f"Refusing to trade: the bucket is what makes this a measurement of "
+        f"{venue['label']} rather than of whatever IBKR routed to."
+    )
 
 
 def _expand_instruments(spec: str) -> list[str]:
@@ -483,6 +551,7 @@ async def run_trial(
         outside_rth: bool = False,
         round_trip_id: str | None = None,
         leg: str | None = None,
+        sec_id: str | None = None,
 ) -> dict[str, Any]:
     """Submit one strategy on one already-qualified contract and capture the
     full metrics row. `tick_size` and `order_types` are pre-fetched per
@@ -499,6 +568,10 @@ async def run_trial(
         "exchange": qualified.exchange,
         "currency": qualified.currency,
         "conId": qualified.conId,
+        # The ISIN when resolution went by ISIN. A UCITS ETF's local ticker
+        # differs per venue, so `symbol` does not say which fund was measured
+        # and a published European figure needs that on the row, not in a log.
+        "sec_id": sec_id,
         "expiry": qualified.lastTradeDateOrContractMonth or None,
         "multiplier": qualified.multiplier or None,
         "strategy_label": strategy,
@@ -710,6 +783,62 @@ def _print_summary(row: dict[str, Any]) -> None:
             print(f"    {key}: {val}")
 
 
+def check_outside_rth(symbols: list[str], outside_rth: bool) -> str:
+    """`""` when the flag combination is runnable, else the reason it is not.
+
+    `--outside-rth` reaches only `build_lmt_mid`, and the European venues have no
+    meaningful extended session on UCITS ETF lines: the limit would rest unfilled
+    for its whole 30 s retry budget and the cell would record a TIMEOUT that says
+    nothing about execution quality. Refused rather than documented, because a
+    caveat in a README does not survive `--instruments all --outside-rth`."""
+    if not outside_rth:
+        return ""
+    eu = [s for s in symbols if s in EU_VENUES]
+    if not eu:
+        return ""
+    return (
+        f"--outside-rth cannot be combined with European cells {eu}: these "
+        f"venues have no extended session on these lines, so the flag can only "
+        f"produce TIMEOUTs. Run the European tier inside "
+        f"{EU_COMMON_WINDOW_CEST} CEST in its own invocation."
+    )
+
+
+def _eu_commission_estimate(symbols: list[str], n_orders_per_cell: int,
+                            n_cells_per_symbol: int) -> list[str]:
+    """Per-venue expected commission for the European cells, from the measured
+    schedule in `broker_ibkr.json` rather than from the flat cross-asset guess.
+
+    At one share every European order pays the per-order MINIMUM, so the cost of
+    a European batch is (orders × minimum) and is independent of notional — the
+    opposite of the usual instinct that a smaller trial is a cheaper trial. That
+    makes the estimate exact enough to approve against, which the $3-per-fill
+    heuristic is not."""
+    eu = [s for s in symbols if s in EU_VENUES]
+    if not eu:
+        return []
+    try:
+        broker = json.loads(
+            (Path(__file__).parent / "cost_tables" / "broker_ibkr.json").read_text()
+        )
+    except (FileNotFoundError, json.JSONDecodeError):
+        return ["  ⚑ EU commission estimate unavailable (broker_ibkr.json unreadable)"]
+    lines = []
+    for symbol in eu:
+        rule = broker.get(EU_VENUES[symbol]["bucket"], {})
+        minimum = rule.get("min_per_order")
+        ccy = rule.get("currency", "")
+        if minimum is None:
+            continue
+        orders = n_cells_per_symbol * n_orders_per_cell
+        lines.append(
+            f"  {EU_VENUES[symbol]['label']:<6}: {orders} orders × "
+            f"{ccy} {minimum:.2f} min/order = {ccy} {orders * minimum:.2f} "
+            f"(at 1 share the minimum binds; notional does not reduce it)"
+        )
+    return lines
+
+
 def _preflight_live(symbols: list[str], strategies: list[str], sides: list[str],
                     qty_table: dict[str, float], qty_override: float | None) -> None:
     """Pre-flight banner for --mode=live. Counts cells, estimates max
@@ -735,6 +864,15 @@ def _preflight_live(symbols: list[str], strategies: list[str], sides: list[str],
           f"(~$3 × 2-leg × {n_cells} cells, before fill-rate discount)")
     eu = [s for s in symbols if s in EU_VENUES]
     if eu:
+        # The flat estimate above is a cross-asset guess. For the European cells
+        # the schedule is known exactly at this size, so print it.
+        print(f"  EU cells      : {eu} — expected commission, from "
+              f"cost_tables/broker_ibkr.json:")
+        for line in _eu_commission_estimate(
+                eu, n_orders_per_cell=2,  # entry + auto-flatten exit
+                n_cells_per_symbol=len(strategies) * len(sides),
+        ):
+            print(line)
         # The US cells cost commission and negligible reg fees. The European
         # ones can attract a transaction TAX, which the estimate above does not
         # model and which is charged on notional rather than per order — SIX and
@@ -742,8 +880,10 @@ def _preflight_live(symbols: list[str], strategies: list[str], sides: list[str],
         # the PTM levy's GBP 10k floor) depend on the specific line that
         # resolves, which is only known after IBKR answers.
         print(f"  ⚑ EU cells    : {eu} — these venues may levy a TRANSACTION TAX "
-              f"on notional, which the estimate above does NOT include")
+              f"on notional, which the estimates above do NOT include")
         print("                  (see cost_tables/tax_rules.json and reg_fees.json)")
+        print(f"  ⚑ EU window   : {EU_COMMON_WINDOW_CEST} CEST is the only window "
+              f"in which all three venues trade")
     print("============================================================")
     print()
 
@@ -753,6 +893,10 @@ async def main() -> None:
     run_id = f"{dt.datetime.now(dt.timezone.utc):%Y%m%dT%H%M%SZ}-{uuid.uuid4().hex[:8]}"
     symbols = _expand_instruments(args.instruments)
     sides = args.side
+
+    rth_refusal = check_outside_rth(symbols, args.outside_rth)
+    if rth_refusal:
+        raise SystemExit(rth_refusal)
 
     # Resolve auto-flatten default: explicit flag wins, else mode default.
     auto_flatten = (
@@ -784,24 +928,40 @@ async def main() -> None:
         # supported order types. Threaded through run_trial below so we don't
         # call reqContractDetailsAsync per cell (avoids the KeyError storm
         # we saw in the earlier full sweep).
-        prepared: dict[str, tuple[Contract, float, list[str]]] = {}
+        prepared: dict[str, tuple[Contract, float, list[str], str | None]] = {}
         for symbol in symbols:
+            is_eu = symbol in EU_VENUES
             try:
-                contract = await _resolve_contract(ib, symbol)
-                qualified = await _qualify_contract(ib, contract)
+                contract, sec_id = await _resolve_contract(ib, symbol)
+                # ⚑ No all-venues retry for a European cell: the venue IS the
+                # measurement, so a contract that will not qualify on its own
+                # venue is a finding, not something to route around.
+                qualified = await _qualify_contract(
+                    ib, contract, allow_exchange_fallback=not is_eu,
+                )
                 tick_size = await _get_tick_size(ib, qualified)
                 order_types = await eligibility.fetch_order_types(ib, qualified)
             except Exception as e:  # noqa: BLE001
                 print(f"\n[{symbol}] resolve/qualify failed: {e}")
                 continue
-            prepared[symbol] = (qualified, tick_size, order_types)
+            refusal = venue_guard(symbol, qualified)
+            if refusal:
+                print(f"\n[{symbol}] SKIPPING INSTRUMENT — {refusal}")
+                continue
+            if is_eu:
+                print(
+                    f"[{symbol}] resolved ISIN={sec_id} → symbol={qualified.symbol} "
+                    f"exchange={qualified.exchange} currency={qualified.currency} "
+                    f"conId={qualified.conId} → bucket={EU_VENUES[symbol]['bucket']}"
+                )
+            prepared[symbol] = (qualified, tick_size, order_types, sec_id)
 
         for side in sides:
             print(f"\n#### LEG: side={side} ####")
             for symbol in symbols:
                 if symbol not in prepared:
                     continue
-                qualified, tick_size, order_types = prepared[symbol]
+                qualified, tick_size, order_types, sec_id = prepared[symbol]
                 qty = args.qty if args.qty is not None else qty_table[symbol]
                 print(
                     f"\n=== {symbol} ({side}) === secType={qualified.secType} "
@@ -817,7 +977,7 @@ async def main() -> None:
                         tick_size=tick_size, order_types=order_types,
                         run_id=run_id, trial_idx=trial_idx, mode=args.mode,
                         outside_rth=args.outside_rth,
-                        round_trip_id=rt_id, leg=entry_leg,
+                        round_trip_id=rt_id, leg=entry_leg, sec_id=sec_id,
                     )
                     path = results.append_row(entry_row, mode=args.mode)
                     _print_summary(entry_row)
@@ -840,15 +1000,52 @@ async def main() -> None:
                             tick_size=tick_size, order_types=order_types,
                             run_id=run_id, trial_idx=trial_idx, mode=args.mode,
                             outside_rth=args.outside_rth,
-                            round_trip_id=rt_id, leg="exit",
+                            round_trip_id=rt_id, leg="exit", sec_id=sec_id,
                         )
                         path = results.append_row(exit_row, mode=args.mode)
                         _print_summary(exit_row)
                         trial_idx += 1
         print(f"\nappended → {path}")
+        if args.mode == "live":
+            await _report_open_positions(ib, prepared)
     finally:
         if ib.isConnected():
             ib.disconnect()
+
+
+async def _report_open_positions(
+        ib: IB, prepared: dict[str, tuple[Contract, float, list[str], str | None]],
+) -> None:
+    """After a live run, name anything the batch left open.
+
+    Auto-flatten fires a MKT_RAW exit after every filled entry, but an exit can
+    time out and the trial row records that quietly, one row among dozens. These
+    are measurement trials, not positions: a residue is a thing to close, not a
+    view. Read-only — it reports, it does not trade, because an automatic
+    corrective order at the end of a batch is a second uncontrolled order."""
+    con_ids = {c.conId: sym for sym, (c, _, _, _) in prepared.items() if c.conId}
+    try:
+        positions = await ib.reqPositionsAsync()
+    except Exception as exc:  # noqa: BLE001
+        print(f"\n[positions] could not read positions: {exc!r}. "
+              f"CHECK THE ACCOUNT MANUALLY before leaving the batch.")
+        return
+    left_open = [
+        p for p in positions
+        if getattr(p.contract, "conId", None) in con_ids and p.position
+    ]
+    print("\n============================================================")
+    if not left_open:
+        print("FLAT — no traded contract carries a position. Batch left nothing open.")
+    else:
+        print("⚑ OPEN POSITIONS LEFT BY THIS BATCH — FLATTEN THESE")
+        for p in left_open:
+            print(f"  {con_ids[p.contract.conId]:<10} {p.contract.symbol} "
+                  f"{p.contract.exchange or p.contract.primaryExchange} "
+                  f"position={p.position} avgCost={p.avgCost}")
+        print("  Not auto-corrected on purpose: an unattended corrective order "
+              "is a second uncontrolled order.")
+    print("============================================================")
 
 
 if __name__ == "__main__":

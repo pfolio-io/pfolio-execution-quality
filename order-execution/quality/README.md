@@ -72,6 +72,58 @@ SMART-routed order records `exchange = SMART`, and the bucket for these three is
 levy; the exemptions depend on the specific line that resolves). The live
 pre-flight banner says so; the commission estimate does not model it.
 
+**The candidate order is load-bearing** *(2026-08-10)*. `EU_ISIN_CANDIDATES` is
+tried in order on **every** venue, so the primary fund is asked for on all three
+before any of them falls through to a fallback. A chain that resolves a different
+fund per venue measures three funds on three venues, and the cross-venue
+difference is then confounded by the instrument with nothing saying so. Which
+ISIN resolved is recorded per trial in the **`sec_id`** column and printed at
+resolution time, so cross-venue comparability is a fact in the data rather than
+an assumption. Within a venue, the venue's expected currency is tried first and
+then dropped, so repeated sessions land on the same line.
+
+#### Running the European tier — read this before the first order
+
+**1. `python -m quality.preflight` first. It places no orders and answers the
+question that costs money.** `snapshot_quote` asks for live data only. Without
+the venue's market-data subscription, `LMT_MID` is SKIPPED for free — but
+`MIDPRICE_NATIVE`, `MKT_ADAPTIVE` and `MKT_RAW` **fill and record a null
+`mid_t0`**, so `slip_vs_mid_t0_bps` is null, `bucket_strategy_matrix` drops the
+row, and the bucket stays UNMEASURED. Full commission, both legs, no
+measurement. The preflight reports, per venue: the account TWS is pointed at,
+which ISIN resolved, the bucket the trials would land in, whether a two-sided
+quote arrives, the touch **and its sizes**, the eligible strategies, and what one
+full pass would cost.
+
+**2. Three guards run before any European order**, and all three decline to
+trade rather than route around the problem:
+
+| Guard | What it stops |
+|---|---|
+| no all-venues retry (`allow_exchange_fallback=False`) | a failed venue qualification silently returning a **SMART** or other-venue contract |
+| bucket asserted pre-trade (`venue_guard`, reading `asset_class_buckets.json`) | a cell trading on the wrong venue and landing in the wrong bucket — or none |
+| `--outside-rth` refused for `EU_*` | a limit resting unfilled for its whole retry budget on a venue with no extended session |
+
+**3. Session window.** XETRA 09:00–17:30 · SIX 09:00–17:20 · LSE 08:00–16:30
+London. **All three trade only between 09:00 and 17:20 CEST**, which overlaps the
+US session by less than two hours. Holiday calendars are per venue.
+
+**4. Commission is shaped the other way round from US.** Per-order minimums of
+€1.25 / £1.00 / CHF 1.50 bind at one share, so a batch costs *orders × minimum*
+and raising the notional does not reduce it. Sizing a European batch is counting
+orders. The live banner prints the per-venue figure from `broker_ibkr.json`.
+
+**5. Convergence targets for these cells** (all three numbers already exist in
+this repo — see the Convergence target section): paper **n ≥ 10** per
+(venue × strategy) before the paper figure is usable at all; live **n ≥ 5** as
+the publication gate; live **n ≥ 20** across ≥ 5 sessions as the target. Sides
+balanced, always `--side BUY SELL`.
+
+⚑ **Live European runs are approved per batch by Marcel, in writing, before they
+fire** (hq convention 0b(vii)). After every live run the harness reads back open
+positions and names anything the batch left open; it does not auto-correct,
+because an unattended corrective order is a second uncontrolled order.
+
 `SMALL_CAP` defaults to `PRIM` (Primoris Services). Swap
 `SMALL_CAP_SYMBOL` in `runner.py` if it delists or you want a different
 small-cap.
@@ -103,7 +155,10 @@ order-execution/
   quality/
     __init__.py
     runner.py          # entry point—sweeps (side × instrument × strategy)
-    instruments.py     # front-month resolution helper
+    preflight.py       # READ-ONLY readiness check—places no orders. Resolution,
+                       # bucket, market data, touch + sizes, eligible strategies
+                       # and the cost of one pass, before anything is submitted
+    instruments.py     # front-month and by-ISIN resolution helpers
     metrics.py         # TickRecorder/VWAP (harness-only) + re-exports of the
                        # shared shapes for backward-compatible imports
     results.py         # parquet/csv append + canonical schema
@@ -123,6 +178,13 @@ order-execution/
 All commands assume CWD = `order-execution/`.
 
 ```bash
+# Read-only readiness check—no orders. Run this before any European batch.
+python -m quality.preflight                    # the three European venues
+python -m quality.preflight --instruments all
+
+# The European tier, both legs. Inside 09:00–17:20 CEST; never --outside-rth.
+python -m quality.runner --instruments eu --side BUY SELL
+
 # Full Tier-1 sweep, BUY leg
 python -m quality.runner
 
@@ -209,11 +271,14 @@ Defined in `runner.py`:
 
 ## Result schema
 
-40 columns. Key groups:
+41 columns. Key groups:
 
 - **Identification**: `schema_version`, `run_id`, `trial_idx`, `timestamp_utc`
 - **Contract**: `symbol`, `secType`, `exchange`, `currency`, `conId`,
-  `expiry`, `multiplier`
+  `sec_id`, `expiry`, `multiplier`. `sec_id` is the **ISIN** when the contract
+  was resolved by ISIN (the European cells) and null otherwise — a UCITS ETF's
+  local ticker differs per venue, so `symbol` alone cannot say which fund a
+  published European figure measured
 - **Strategy**: `strategy_label`, `eligible`, `skip_reason`
 - **Request**: `side` (±1), `requested_qty`, `tick_size`
 - **T0 snapshot**: `t0`, `bid_t0`, `ask_t0`, `mid_t0`, `spread_t0_bps`,
@@ -270,6 +335,42 @@ breaking changes (renames, type changes).
 Per spec: ≥20 trials per `(instrument × strategy)` cell across ≥5
 sessions. Manually triggered (no cron). Re-run `analyze.py` after each
 session to track convergence.
+
+Two lower thresholds are operative before that one, and both come from
+`tool/src/02-data.js::bestGuess`, which decides what the public matrix shows:
+**live n ≥ 5** per (bucket × strategy) is trusted standalone (between 2 and 4 it
+needs a paper cross-check within `OUTLIER_BPS`), and **paper n ≥ 10** is the
+floor below which paper is not used at all. So: paper to 10, live to 5 as the
+publication gate, live to 20 as the target — sides balanced, since the sign
+convention only cancels drift when the BUY and SELL legs are equal in number.
+
+## Unmeasured is a row, not an omission
+
+`--export-matrix-csv` emits **one explicit all-zero-`n` row per declared but
+unmeasured bucket**, medians blank:
+
+```
+EU_STK_LSE,,0,,0,,0,,0
+```
+
+`cost_model.py` floors slippage at zero, so a measured bucket can publish
+`0.00 bps` from a **measured negative** — fills at or inside the mid, capped so
+the total is not a promise of price improvement — while an unmeasured bucket
+would publish the same `0.00` from nothing at all. The two look identical and
+mean opposite things, and only one of them can move: **an unmeasured figure can
+only go up.** The Python calculator already distinguishes them
+(`measurement_state`, `unmeasured=True`, `PARTIAL TOTAL`); the matrix CSV did
+not, because an unmeasured bucket was simply an absent row and absence reads as
+*not applicable*. A blank median beside `n = 0` cannot be read as zero cost.
+
+Downstream-neutral: every consumer already treats `n = 0` as no data.
+
+⚑ **`tool/src/02-data.js::cellState` maps "no trials either side" to
+`ineligible`, which the public matrix renders as *not supported*.** For the EU
+buckets that label would be false — they are supported and unmeasured. It is
+harmless only because `BUCKET_ORDER` lists six US buckets. **Adding an EU row to
+the public tool requires a fourth cell state first** (measured · thin ·
+unmeasured · not supported).
 
 ## Related files
 

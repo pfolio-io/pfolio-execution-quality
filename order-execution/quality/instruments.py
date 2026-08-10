@@ -78,10 +78,17 @@ async def resolve_by_isin(
         exchange: str,
         *,
         currency: str = "",
-) -> Contract:
-    """First of `candidates` that IBKR can qualify as a stock on `exchange`.
+) -> "tuple[Contract, str]":
+    """First of `candidates` that IBKR can qualify as a stock on `exchange`,
+    with the ISIN that resolved it.
 
-    `candidates` is `((isin, human_name), ...)`, tried in order.
+    `candidates` is `((isin, human_name), ...)`, tried **in order**, and the
+    order is the point: the caller puts one primary fund first so that every
+    venue is asked for the same fund before any of them falls through. A chain
+    that resolves a different fund per venue measures three funds on three
+    venues, and the cross-venue difference is then confounded by the
+    instrument. Returning the ISIN is what lets the caller record which of the
+    two happened, per venue, per trial.
 
     **Why ISIN and not a ticker.** A UCITS ETF trades under a different local
     ticker on every venue it is listed on, and nothing in this repo — or in the
@@ -95,34 +102,55 @@ async def resolve_by_isin(
     venue-partitioned buckets in `asset_class_buckets.json` would then have
     nothing to key on. Measuring the router is not measuring the venue.
 
-    `currency` is passed through when the caller knows it and left empty
-    otherwise: IBKR will report the listing's own currency, and the bucket map
-    matches on what came back rather than on what anyone expected.
+    `currency` is a **preference, not a filter**: it is tried first and then
+    dropped. One ISIN on one venue can return several lines (currency and
+    trading-class variants), and taking `details[0]` from an unconstrained query
+    means the pick is IB's ordering — undocumented, and free to differ between
+    sessions, so the same run label could measure a different line on a different
+    day with nothing raising. Asking for the expected currency first makes
+    repeated sessions land on the same line; dropping it when that finds nothing
+    keeps IBKR's answer authoritative, since the bucket map matches on what came
+    back rather than on what anyone expected.
 
     Raises ValueError naming every candidate tried, because "no European
     instrument resolved" is a finding about the account's permissions or market
     data as often as it is about the contract.
     """
     tried = []
+    # Preferred currency first, then unconstrained. Same candidate order in both
+    # passes, so the primary fund still beats a fallback fund on every venue.
+    attempts = [currency, ""] if currency else [""]
     for isin, name in candidates:
-        template = Contract(
-            secType="STK", exchange=exchange, currency=currency,
-            secIdType="ISIN", secId=isin,
-        )
-        try:
-            details = await ib.reqContractDetailsAsync(template)
-        except Exception as exc:  # noqa: BLE001 — IB raises several unrelated types
-            tried.append(f"{isin} ({name}): {exc!r}")
-            continue
-        if not details:
-            tried.append(f"{isin} ({name}): no contract details on {exchange}")
-            continue
-        contract = details[0].contract
-        log.info(
-            "Resolved %s on %s: symbol=%s currency=%s conId=%s (%s)",
-            isin, exchange, contract.symbol, contract.currency, contract.conId, name,
-        )
-        return contract
+        for attempt_ccy in attempts:
+            template = Contract(
+                secType="STK", exchange=exchange, currency=attempt_ccy,
+                secIdType="ISIN", secId=isin,
+            )
+            label = f"{isin} ({name})" + (f" in {attempt_ccy}" if attempt_ccy else "")
+            try:
+                details = await ib.reqContractDetailsAsync(template)
+            except Exception as exc:  # noqa: BLE001 — IB raises several unrelated types
+                tried.append(f"{label}: {exc!r}")
+                continue
+            if not details:
+                tried.append(f"{label}: no contract details on {exchange}")
+                continue
+            if len(details) > 1:
+                log.warning(
+                    "%s on %s: %d lines matched — taking conId=%s (%s). The "
+                    "others: %s",
+                    isin, exchange, len(details), details[0].contract.conId,
+                    details[0].contract.currency,
+                    [(d.contract.conId, d.contract.currency, d.contract.symbol)
+                     for d in details[1:]],
+                )
+            contract = details[0].contract
+            log.info(
+                "Resolved %s on %s: symbol=%s currency=%s conId=%s (%s)",
+                isin, exchange, contract.symbol, contract.currency,
+                contract.conId, name,
+            )
+            return contract, isin
 
     raise ValueError(
         f"no ISIN candidate resolved on exchange={exchange!r}. Tried:\n  "

@@ -22,6 +22,13 @@ COLUMNS: list[str] = [
     "run_id", "trial_idx", "timestamp_utc",
     # contract
     "symbol", "secType", "exchange", "currency", "conId", "expiry", "multiplier",
+    # `sec_id` — the ISIN, when the contract was resolved by ISIN (the European
+    # cells). Null for every US cell, which resolves by ticker. Added 2026-08-10:
+    # a UCITS ETF trades under a different local ticker on every venue, so
+    # `symbol` alone cannot say which fund a published European figure measured.
+    # Additive and nullable, so no SCHEMA_VERSION bump — parquet append uses
+    # promote=True and older rows read back as null.
+    "sec_id",
     # strategy
     "strategy_label", "eligible", "skip_reason",
     # request

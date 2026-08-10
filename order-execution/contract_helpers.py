@@ -11,7 +11,9 @@ from ib_insync import IB, Contract
 log = logging.getLogger(__name__)
 
 
-async def _qualify_contract(ib: IB, contract: Contract) -> Contract:
+async def _qualify_contract(
+        ib: IB, contract: Contract, *, allow_exchange_fallback: bool = True,
+) -> Contract:
     """
     Resolve a partial contract against IB's database.
     Fills in missing fields (conId, multiplier, tradingClass, currency, etc.).
@@ -20,11 +22,19 @@ async def _qualify_contract(ib: IB, contract: Contract) -> Contract:
     exchange='' so IB searches all venues—useful for diagnosing whether
     the exchange code is the problem.
 
+    ⚑ `allow_exchange_fallback=False` disables that retry, and callers measuring
+    a **named venue** must pass it. The retry is a helpful diagnostic when the
+    exchange is routing (SMART), and a correctness hole when the exchange is the
+    measurement: it can return a SMART or other-venue contract, which then trades
+    and records an `exchange` that belongs to a different bucket—or to none. The
+    European cells are defined by venue, so for them a contract that will not
+    qualify on its own venue is a finding, not something to route around.
+
     Raises ValueError if IB cannot find a unique match.
     """
     qualified = await ib.qualifyContractsAsync(contract)
 
-    if not qualified and contract.exchange:
+    if not qualified and contract.exchange and allow_exchange_fallback:
         log.warning(
             "%s: qualification failed with exchange=%r—retrying with exchange='' to search all venues",
             contract.symbol, contract.exchange,
@@ -44,6 +54,9 @@ async def _qualify_contract(ib: IB, contract: Contract) -> Contract:
             f"(secType={contract.secType!r}, exchange={contract.exchange!r}, "
             f"lastTradeDateOrContractMonth={contract.lastTradeDateOrContractMonth!r}, "
             f"currency={contract.currency!r})—verify the contract fields"
+            + ("" if allow_exchange_fallback else
+               "; the all-venues retry is disabled for this contract because it "
+               "is measuring a named venue")
         )
     if len(qualified) > 1:
         log.warning(

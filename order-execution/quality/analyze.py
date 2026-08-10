@@ -184,7 +184,45 @@ def bucket_strategy_matrix(df: pd.DataFrame) -> pd.DataFrame:
     for strat in sorted(wide_med.columns):
         out[f"{strat}_median_bps"] = wide_med[strat]
         out[f"{strat}_n"] = wide_n[strat]
-    return out.reset_index()
+    return _with_unmeasured_rows(out, absent).reset_index()
+
+
+def _with_unmeasured_rows(out: pd.DataFrame, absent: list[str]) -> pd.DataFrame:
+    """Add one explicit all-zero-n row per declared-but-unmeasured bucket.
+
+    **Why a row and not an omission.** `cost_model.py` floors slippage at zero,
+    so a US bucket can publish `0.00 bps` from a *measured* negative — fills at
+    or inside the mid, capped so the total is not a promise of price improvement
+    — while an unmeasured bucket would publish the same `0.00` from nothing at
+    all. The two totals look identical and mean opposite things, and only one of
+    them can move: an unmeasured figure can only go **up**.
+
+    The Python calculator already distinguishes them (`measurement_state`,
+    `unmeasured=True`, `PARTIAL TOTAL`). The matrix CSV did not: an unmeasured
+    bucket was simply an **absent row**, and absence reads as *not applicable*
+    rather than *never measured*. A blank median beside `n = 0` cannot be read as
+    zero cost, and it puts the answer in the file instead of in whoever remembers.
+
+    Downstream-neutral by construction: every consumer already treats `n = 0` as
+    no data (`tool/src/02-data.js::bestGuess` returns null below its thresholds),
+    so this changes what a reader sees and no number anywhere.
+    """
+    if not absent:
+        return out
+    n_cols = [c for c in out.columns if c.endswith("_n")]
+    med_cols = [c for c in out.columns if c.endswith("_median_bps")]
+    # NaN rather than pd.NA: it keeps the median columns float, so they still
+    # render through `--export-matrix-csv`'s `%.4f` and read back as numbers.
+    blank = pd.DataFrame(
+        [{**{c: float("nan") for c in med_cols}, **{c: 0 for c in n_cols}}
+         for _ in absent],
+        index=pd.Index(sorted(absent), name=out.index.name),
+    )
+    combined = pd.concat([out, blank]).sort_index()
+    # `concat` with NA promotes the counts to float; they are counts.
+    for col in n_cols:
+        combined[col] = combined[col].fillna(0).astype(int)
+    return combined
 
 
 def coverage_table(df: pd.DataFrame) -> pd.DataFrame:
