@@ -119,6 +119,36 @@ def test_the_eu_tier_is_reachable_by_name():
 
 
 # --------------------------------------------------------------------------- #
+# The account/mode gate, both directions
+# --------------------------------------------------------------------------- #
+
+def test_live_mode_against_a_paper_account_is_refused():
+    """Untouched, and load-bearing: paper fills in the live store would corrupt
+    the calibration dataset silently."""
+    assert runner.account_mode_refusal("live", "DU1234567")
+    assert runner.account_mode_refusal("live", "U1234567") == ""
+
+
+def test_paper_mode_against_a_live_account_is_refused():
+    """It used to print 'Orders WILL fire on a real account' and then fire them,
+    writing the fills to the store the repo documents as synthetic. Wrong money,
+    wrong store, and the store is where it would not show."""
+    refusal = runner.account_mode_refusal("paper", "U1234567")
+    assert refusal and "LIVE" in refusal
+    assert runner.account_mode_refusal("paper", "DU1234567") == ""
+
+
+def test_the_escape_hatch_exists_and_is_explicit():
+    assert runner.account_mode_refusal(
+        "paper", "U1234567", allow_live_account=True,
+    ) == ""
+    # …and does not weaken the other direction, which has no escape hatch.
+    assert runner.account_mode_refusal(
+        "live", "DU1234567", allow_live_account=True,
+    )
+
+
+# --------------------------------------------------------------------------- #
 # The provenance column
 # --------------------------------------------------------------------------- #
 

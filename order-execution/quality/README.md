@@ -228,6 +228,7 @@ python -m quality.analyze --last-run --report-path RTH.md   # write to a separat
 | `--auto-flatten`    | live=on, paper=off         | After each FILLED entry leg, fire MKT_RAW exit at same qty so net exposure stays ~0. Both legs share `round_trip_id` |
 | `--no-auto-flatten` |—                        | Force-disable auto-flatten (positions accumulate)                                                                    |
 | `--yes-live`        | required for `--mode=live` | Confirms real orders will be placed against a live account                                                           |
+| `--allow-live-account` | off                     | Permits `--mode=paper` against a LIVE (non-DU) account. Without it the runner **refuses**—see below                  |
 
 ## Live mode
 
@@ -241,6 +242,14 @@ safeguards:
 3. **Account-prefix gate**—refuses to start if the connected account
    starts with `DU` (paper). Prevents paper fills from polluting the
    live calibration dataset.
+
+**The gate now runs in both directions** *(2026-08-10)*. `--mode paper` against a
+**live** (non-`DU`) account is also a refusal, with `--allow-live-account` as the
+escape hatch. It used to print *"Orders WILL fire on a real account"* and then
+fire them, writing the fills to `trials_paper.parquet` — where this README's own
+caveat says paper fills are synthetic and unquotable. Real money spent, and
+filed in the one place that would not show it. **A paper run needs TWS pointed at
+the `DU` account, not just `--mode paper` on the command line.**
 
 Auto-flatten is **on by default** in live mode: after each FILLED entry
 leg, a `MKT_RAW` exit is fired at the same qty in the opposite direction

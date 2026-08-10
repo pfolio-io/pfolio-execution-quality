@@ -13,8 +13,12 @@ Examples (run from `order-execution/`):
     python -m quality.runner --instruments ES,EURUSD --strategies LMT_MID MKT_RAW
 
 `--mode` controls only which result store (paper vs live) the row is written
-to and the `paper_account` field; it does not change the TWS port. The
-harness warns if `--mode` disagrees with the connected account's DU/U prefix.
+to and the `paper_account` field; it does not change the TWS port. The harness
+**refuses** to start when `--mode` disagrees with the connected account's DU/U
+prefix, in either direction — `--mode live` on a DU account would corrupt the
+live calibration dataset, and `--mode paper` on a live account would spend real
+money and file the result as synthetic. `--allow-live-account` overrides the
+second when that is genuinely intended.
 
 For the per-instrument list and per-strategy timeout/retry policy see the
 constants block below.
@@ -692,34 +696,68 @@ async def run_trial(
 # ---------------------------------------------------------------------------
 # Connection
 # ---------------------------------------------------------------------------
-async def _connect(mode: str) -> IB:
-    """Connect and enforce mode/account consistency.
+async def _connect(mode: str, *, allow_live_account: bool = False) -> IB:
+    """Connect and enforce mode/account consistency, in both directions.
 
     Hard rule: refuse to start when `mode=live` is paired with a paper
     account (DU prefix). Writing paper-account fills into trials_live.parquet
-    would silently corrupt the live calibration dataset. The reverse
-    (`mode=paper` on a live account) is just a warning—paper-store rows
-    don't drive any live decisions, but the flag mismatch is suspicious."""
+    would silently corrupt the live calibration dataset.
+
+    ⚑ **The reverse is now also a refusal** *(2026-08-10)*, with
+    `--allow-live-account` as the escape hatch. It used to be a `print` reading
+    "Orders WILL fire on a real account" — and then they did, with the results
+    written to the paper store, where the repo's own caveat says fills are
+    synthetic and unquotable. That was survivable while nobody had a reason to
+    be logged into the live account. Both halves changed the day the European
+    market-data subscriptions were bought in the live account and the first
+    European paper run was scheduled for the next morning: a run intended to
+    cost nothing would have spent real commission, and the store it landed in is
+    the one place that would not show it."""
     ib = IB()
     await ib.connectAsync(IB_HOST, IB_PORT, clientId=IB_CLIENT_ID)
     accounts = ib.managedAccounts()
     if not accounts:
         return ib
     account = accounts[0]
+    refusal = account_mode_refusal(
+        mode, account, allow_live_account=allow_live_account,
+    )
+    if refusal:
+        ib.disconnect()
+        raise SystemExit(refusal)
+    if mode == "paper" and not account.startswith("DU"):
+        print(
+            f"[warn] --mode=paper against LIVE account {account!r} with "
+            f"--allow-live-account. REAL ORDERS WILL FIRE and the fills go to "
+            f"the paper store."
+        )
+    return ib
+
+
+def account_mode_refusal(
+        mode: str, account: str, *, allow_live_account: bool = False,
+) -> str:
+    """`""` when `mode` may run against `account`, else the reason it may not.
+
+    Pure, so the two directions can be tested without a broker connection —
+    which matters because both of them exist to prevent something that is only
+    discovered after it has already happened."""
     is_paper_account = account.startswith("DU")
     if mode == "live" and is_paper_account:
-        ib.disconnect()
-        raise SystemExit(
+        return (
             f"refusing to run --mode=live against paper account {account!r}. "
             f"Switch TWS to a live account (U-prefixed) and try again."
         )
-    if mode == "paper" and not is_paper_account:
-        print(
-            f"[warn] --mode=paper but account={account!r} is a live account. "
-            f"Orders WILL fire on a real account. Results write to the paper "
-            f"store; consider --mode live instead."
+    if mode == "paper" and not is_paper_account and not allow_live_account:
+        return (
+            f"refusing to run --mode=paper against LIVE account {account!r}. "
+            f"Real orders would fire and the fills would be written to the "
+            f"paper store, which is documented as synthetic and unquotable. "
+            f"Point TWS at the paper account (DU-prefixed), or pass "
+            f"--allow-live-account if spending real money into the paper store "
+            f"is genuinely what you want."
         )
-    return ib
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -756,6 +794,12 @@ def _parse_args() -> argparse.Namespace:
         "--yes-live", action="store_true",
         help="Required when --mode=live. Acknowledges that real orders will "
              "be sent against a live account.",
+    )
+    p.add_argument(
+        "--allow-live-account", action="store_true",
+        help="Permit --mode=paper against a LIVE (non-DU) account. Real orders "
+             "fire and the fills land in the paper store, which is documented "
+             "as synthetic. Without this the runner refuses.",
     )
     flatten = p.add_mutually_exclusive_group()
     flatten.add_argument(
@@ -920,7 +964,7 @@ async def main() -> None:
         f"strategies={args.strategies}"
     )
 
-    ib = await _connect(args.mode)
+    ib = await _connect(args.mode, allow_live_account=args.allow_live_account)
     try:
         path = None
         trial_idx = 0
