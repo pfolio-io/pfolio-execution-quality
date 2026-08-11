@@ -149,6 +149,9 @@ def test_the_shared_instrument_key_is_the_one_both_consumers_use():
 # --------------------------------------------------------------------------- #
 
 def test_a_declared_but_untraded_class_reports_unmeasured_not_missing():
+    """`EU_STK_LSE` was the example until it started measuring on 2026-08-11.
+    Its *live* store is still empty — only paper has fills — which is exactly the
+    distinction `measurement_state` exists to draw."""
     assert harness_data.is_declared("EU_STK_LSE")
     assert harness_data.measurement_state("EU_STK_LSE", mode="live") == "unmeasured"
     assert harness_data.measurement_state("NOT_A_CLASS") == "undeclared"
@@ -160,6 +163,27 @@ def test_a_measured_class_reports_measured():
     assert harness_data.measurement_state("US_STK", mode="live") == "measured"
 
 
+def _an_unmeasured_class(mode: str = "paper") -> str:
+    """A declared class the store has no usable measurement for.
+
+    ⚑ Was hardcoded to `EU_STK_LSE` until 2026-08-11, when that bucket started
+    carrying fills — which is the outcome this whole exercise was for, and it
+    broke the test. Selecting one instead of naming one keeps the assertion
+    about the *behaviour* (an unmeasured class must be flagged, not silently
+    zeroed) rather than about which class happens to be empty this week."""
+    import pandas as pd
+    store = (REPO / "order-execution" / "quality" / "results"
+             / f"trials_{mode}.parquet")
+    if not store.exists():
+        pytest.skip(f"no {mode} trial store")
+    df = pd.read_parquet(store)
+    fills = df[(df["status"] == "FILLED") & df["slip_vs_mid_t0_bps"].notna()]
+    absent = buckets.unmeasured_classes(fills)
+    if not absent:
+        pytest.skip("every declared class is measured — nothing left to assert on")
+    return sorted(absent)[0]
+
+
 def test_an_unmeasured_european_total_is_flagged_incomplete():
     """The defect, stated as a test.
 
@@ -169,7 +193,8 @@ def test_an_unmeasured_european_total_is_flagged_incomplete():
     inadmissible, and a zero arriving by omission is an assumed spread.
     """
     out = cost_model.compute_cost(cost_model.CostInput(
-        symbol="X", asset_class="EU_STK_LSE", side="BOTH", qty=1000, price=7,
+        symbol="X", asset_class=_an_unmeasured_class(), side="BOTH",
+        qty=1000, price=7,
     ))
     assert not out.is_complete
     assert out.unmeasured_components, "no component was flagged"
@@ -193,7 +218,8 @@ def test_a_measured_zero_and_an_unmeasured_zero_are_distinguishable():
     """They were not, before. Same number, same column, same total — the only
     difference was a `source` string, and no total reads a string."""
     eu = cost_model.compute_cost(cost_model.CostInput(
-        symbol="X", asset_class="EU_STK_LSE", side="BUY", qty=1000, price=7))
+        symbol="X", asset_class=_an_unmeasured_class(), side="BUY",
+        qty=1000, price=7))
     us = cost_model.compute_cost(cost_model.CostInput(
         symbol="AAPL", asset_class="US_STK", side="BUY", qty=100, price=200))
     eu_slip = [line for line in eu.lines if line.label.startswith("slippage")][0]

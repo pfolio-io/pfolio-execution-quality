@@ -113,7 +113,7 @@ TIER3 = ("DX", "VIX_FAR", "SMALL_CAP")
 # European venues. A separate tier rather than an addition to tier 2, because
 # they are the only cells that need European market data and a European trading
 # permission, and a run that lacks either should be able to skip them by name.
-TIER_EU = ("EU_ETF_EUR", "EU_ETF_GBP")
+TIER_EU = ("EU_ETF_EUR", "EU_ETF_GBP", "EU_ETF_CHF")
 
 TIERS = {
     "tier1": TIER1,
@@ -204,11 +204,36 @@ EU_ISIN_CANDIDATES = (
 # `bucket` is the venue bucket each line is EXPECTED to land in, from the primary
 # listing — a prior for the coverage report, never a filter. Where it really goes
 # is measured.
+# ⚑ The CHF cell uses a DIFFERENT FUND, and that is forced, not chosen
+# (measured 2026-08-11). The three global candidates have **zero** CHF listings
+# between them — 0 of 26, 28 and 26 — and none is SIX-primary. The only ETFs that
+# are natively SIX-listed in CHF are Swiss-domiciled trackers, so measuring SIX at
+# all means measuring a Swiss-equity fund.
+#
+# That breaks the one-fund-across-cells property §2 was protecting, and under
+# E-14 it costs less than it would have: cross-venue comparability was already
+# given up when the venue stopped being chosen. What is left is cost per user, and
+# a Swiss client buying a Swiss-listed CHF tracker is a real population. The
+# confound is real and is stated rather than hidden — the CHF cell measures a
+# different asset class, so its spread is not comparable with the other two.
+#
+# Ordered by the same criterion as the global chain — broadest first, then
+# liquidity. `CSBGC0` is deliberately absent: 17.4 bps against 4.0–8.8 for the
+# others on the same morning.
+EU_CHF_ISIN_CANDIDATES = (
+    ("CH0237935652", "iShares Core SPI (CH) — broad Swiss market"),
+    ("CH0017142719", "UBS ETF (CH) SMI — 20 blue chips, tightest quote"),
+    ("CH0130595124", "UBS ETF (CH) SPI Mid"),
+)
+
 EU_LINES = {
     "EU_ETF_EUR": {"currency": "EUR", "label": "EUR line (Xetra-primary)",
                    "expect_bucket": "EU_STK_XETRA"},
     "EU_ETF_GBP": {"currency": "GBP", "label": "GBP line (LSE-primary)",
                    "expect_bucket": "EU_STK_LSE"},
+    "EU_ETF_CHF": {"currency": "CHF", "label": "CHF line (SIX-primary, Swiss fund)",
+                   "expect_bucket": "EU_STK_SIX",
+                   "isins": EU_CHF_ISIN_CANDIDATES},
     # ⚑ NOT IN `TIER_EU`, and the reason is a finding rather than an omission
     # (2026-08-11): **IBKR publishes no SMART listing for the USD line.** It
     # resolves only on direct venues — LSEETF, EBS and the MTFs — so a user
@@ -247,7 +272,7 @@ DEFAULT_QTY = {
     # schedule, not a distortion of the measurement: `slip_vs_mid_t0_bps` is the
     # quantity these cells exist to measure and it is size-independent at this
     # notional. The commission column is read from the fill either way.
-    "EU_ETF_EUR": 1.0, "EU_ETF_GBP": 1.0, "EU_ETF_USD": 1.0,
+    "EU_ETF_EUR": 1.0, "EU_ETF_GBP": 1.0, "EU_ETF_USD": 1.0, "EU_ETF_CHF": 1.0,
 }
 
 # Live-mode quantities. IDEALPRO live minimum is typically 25k base for
@@ -303,9 +328,10 @@ async def _resolve_contract(ib: IB, symbol: str) -> tuple[Contract, str | None]:
         # separates the three cells now that the venue is an observation. The
         # currency is a real filter here, unlike the old venue lookup where it
         # was only a preference: two lines of one fund differ by nothing else.
+        line = EU_LINES[symbol]
         return await instruments.resolve_by_isin(
-            ib, EU_ISIN_CANDIDATES, "SMART",
-            currency=EU_LINES[symbol]["currency"], require_currency=True,
+            ib, line.get("isins", EU_ISIN_CANDIDATES), "SMART",
+            currency=line["currency"], require_currency=True,
         )
     raise ValueError(f"unknown symbol {symbol!r}; known: {KNOWN_SYMBOLS}")
 

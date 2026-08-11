@@ -162,11 +162,26 @@ def test_the_usd_line_is_addressable_but_not_in_the_tier():
     assert runner._expand_instruments("EU_ETF_USD") == ["EU_ETF_USD"]
 
 
-def test_the_three_cells_are_three_distinct_currencies():
-    """They are the same fund; the listing currency is the only thing separating
-    them, which is why resolution requires it rather than preferring it."""
+def test_each_cell_is_a_distinct_listing_currency():
+    """The currency is the only thing separating the cells, which is why
+    resolution requires it rather than preferring it."""
     ccys = [line["currency"] for line in runner.EU_LINES.values()]
-    assert sorted(ccys) == ["EUR", "GBP", "USD"]
+    assert sorted(ccys) == sorted(set(ccys)), "two cells share a currency"
+    assert set(ccys) == {"EUR", "GBP", "USD", "CHF"}
+
+
+def test_the_chf_cell_uses_a_different_fund_and_says_so():
+    """Forced, not chosen: the global candidates have zero CHF listings, so the
+    only natively SIX-listed CHF ETFs are Swiss-domiciled trackers. The confound
+    is real — the CHF cell measures a different asset class — and the separate
+    candidate chain is where that is visible in the code."""
+    chf = runner.EU_LINES["EU_ETF_CHF"]
+    assert chf["isins"] is runner.EU_CHF_ISIN_CANDIDATES
+    assert not set(i for i, _ in runner.EU_CHF_ISIN_CANDIDATES) & set(
+        i for i, _ in runner.EU_ISIN_CANDIDATES)
+    for line in ("EU_ETF_EUR", "EU_ETF_GBP", "EU_ETF_USD"):
+        assert "isins" not in runner.EU_LINES[line], (
+            f"{line} should use the shared global chain")
 
 
 # --------------------------------------------------------------------------- #
