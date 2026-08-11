@@ -108,14 +108,32 @@ def test_us_equity_buckets_ignore_the_venue_entirely():
 # --------------------------------------------------------------------------- #
 
 def test_coverage_flags_a_venue_with_no_commission_rule():
-    """GETTEX2 is where SMART actually sent a Xetra-primary ETF on 2026-08-11,
-    and `broker_ibkr.json` has no rule for it. A fill there is priced by nothing;
-    this is what says so instead of leaving a hole in a total."""
+    """AEB is Amsterdam. The EUR line's `validExchanges` includes it, so SMART
+    *could* route there — and the bucket map deliberately does not accept it,
+    because folding another country into the German bucket would be the same
+    error as calling a Gettex fill XETRA. If SMART ever uses it, this is what
+    says the fill is priced by nothing instead of leaving a hole in a total.
+
+    ⚑ `GETTEX2` was this test's example until 2026-08-11, when the selectors
+    widened to cover the venues SMART actually reaches for each line. That it
+    stopped failing here is the edit working."""
     rows = [{"status": "FILLED", "symbol": "SXR8", "secType": "STK",
-             "currency": "EUR", "exec_exchange": "GETTEX2"}]
+             "currency": "EUR", "exec_exchange": "AEB"}]
     cov = runner.venue_coverage(rows)
-    assert cov["GETTEX2"]["fills"] == 1
-    assert cov["GETTEX2"]["priced"] is False
+    assert cov["AEB"]["fills"] == 1
+    assert cov["AEB"]["bucket"] is None
+    assert cov["AEB"]["priced"] is False
+
+
+def test_the_venues_smart_actually_used_are_all_priced_now():
+    """Every venue observed in 71 trials on 2026-08-11. Before the selector
+    widening, 17 of 28 fills were discarded."""
+    for venue, ccy in (("IBIS2", "EUR"), ("GETTEX2", "EUR"),
+                       ("LSEETF", "GBP"), ("EBS", "CHF"), ("BATECH", "CHF")):
+        cov = runner.venue_coverage([{
+            "status": "FILLED", "symbol": "X", "secType": "STK",
+            "currency": ccy, "exec_exchange": venue}])
+        assert cov[venue]["priced"], f"{venue}/{ccy} still unpriced"
 
 
 def test_coverage_confirms_a_venue_canon_can_price():
