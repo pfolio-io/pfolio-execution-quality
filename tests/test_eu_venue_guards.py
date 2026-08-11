@@ -52,6 +52,20 @@ def test_every_eu_venue_names_a_bucket_that_the_map_declares():
         )
 
 
+def test_each_venue_code_is_one_the_bucket_map_accepts():
+    """Cheap containment check. It would not have caught 2026-08-11's failure —
+    `IBIS` and `LSE` were both in `exchange_any`, and only IBKR could say that
+    neither exists — but it catches a typo, and it states the invariant that the
+    runner's venue code must be one the map can bucket."""
+    declared = buckets.load_bucket_map()
+    for symbol, venue in runner.EU_VENUES.items():
+        accepted = declared[venue["bucket"]].exchange_any
+        assert venue["exchange"] in accepted, (
+            f"{symbol} routes to {venue['exchange']!r}, which "
+            f"{venue['bucket']} does not accept: {accepted}"
+        )
+
+
 def test_the_expected_venue_and_currency_resolve_to_the_expected_bucket():
     for symbol, venue in runner.EU_VENUES.items():
         got = runner.bucket_of(
@@ -163,8 +177,14 @@ def test_the_trial_schema_carries_the_isin():
 def test_the_primary_isin_is_tried_first_on_every_venue():
     """The candidate list is an ordered chain, and the order is what keeps the
     three venues measuring the same fund. If the primary ever stops being first,
-    a cross-venue comparison silently becomes a cross-fund comparison."""
-    assert runner.EU_ISIN_CANDIDATES[0][0] == "IE00B4L5Y983"
+    a cross-venue comparison silently becomes a cross-fund comparison.
+
+    The primary is `IE00B5BMR087` as of 2026-08-11: its EUR line is the only one
+    of the three that is **IBKR-primary on IBIS2**. The others are Amsterdam- or
+    London-primary and merely routable to Xetra, which makes a Xetra order in
+    them a foreign-primary instrument sent to Xetra — and bills the quote to a
+    market-data feed no German subscription covers."""
+    assert runner.EU_ISIN_CANDIDATES[0][0] == "IE00B5BMR087"
     assert len({isin for isin, _ in runner.EU_ISIN_CANDIDATES}) == len(
         runner.EU_ISIN_CANDIDATES
     )

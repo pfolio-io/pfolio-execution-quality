@@ -148,9 +148,26 @@ KNOWN_SYMBOLS = TIER1 + TIER2 + TIER3 + TIER_EU
 # They are tried in order and the first that IBKR can qualify on the venue wins;
 # which one that is, is recorded per trial row, so the report says what it
 # actually traded.
+# ⚑ ORDER CHANGED 2026-08-11, after asking IBKR what it actually lists. The
+# criterion is unchanged — largest, broadest UCITS equity lines — but one fact
+# only visible from the listings decides between them: **IBKR bills market data
+# on the PRIMARY exchange, not on the venue you route to.**
+#
+#   IE00B4L5Y983  EUR line = conId 100292038, primary **AEB** (Amsterdam),
+#                 merely *routable* to IBIS2. So a Xetra order in it is an
+#                 Amsterdam-primary instrument sent to Xetra, and its quote is
+#                 billed as Amsterdam data, which no German subscription covers.
+#   IE00B5BMR087  EUR line = conId 75776072, symbol SXR8, primary **IBIS2**.
+#                 Genuinely German-primary. It is what "measuring XETRA" means,
+#                 and it is what a German market-data subscription pays for.
+#
+# It also keeps one fund across all three venues, which is what §2 of the record
+# is protecting: SXR8 on IBIS2 (EUR) · CSPX on LSEETF (USD) · CSPX on EBS (USD).
+# The MSCI World line stays as the first fallback — same issuer, same shape, and
+# it is the larger of the two by a hair on the screen's own AUM column.
 EU_ISIN_CANDIDATES = (
-    ("IE00B4L5Y983", "iShares Core MSCI World UCITS ETF"),      # ~USD 144bn
     ("IE00B5BMR087", "iShares Core S&P 500 UCITS ETF"),         # ~USD 151bn
+    ("IE00B4L5Y983", "iShares Core MSCI World UCITS ETF"),      # ~USD 144bn
     ("IE00BKM4GZ66", "iShares Core MSCI EM IMI UCITS ETF"),     # ~USD 41bn
 )
 
@@ -165,11 +182,23 @@ EU_ISIN_CANDIDATES = (
 # discovered at analysis time: a European cell that resolves to the wrong venue
 # still trades, still costs the commission, and then falls out of the matrix as
 # an unmapped instrument with nothing but a printed warning.
+# ⚑ THE CODES ARE `IBIS2` AND `LSEETF`, MEASURED 2026-08-11 AGAINST IBKR, NOT
+# `IBIS` AND `LSE`. Those were the plausible codes and both returned error 200,
+# "no security definition", for all three ISINs. Asking IBKR for every listing of
+# `IE00B4L5Y983` with no exchange constraint settled it: the EUR line routes to
+# `IBIS2`, the London lines to `LSEETF`. `asset_class_buckets.json` already
+# accepted both correct codes — canon was right and this constant was wrong,
+# which is why `venue_guard` had nothing to catch: the run never got that far.
 EU_VENUES = {
-    "EU_XETRA": {"exchange": "IBIS", "expect_currency": "EUR", "label": "XETRA",
+    "EU_XETRA": {"exchange": "IBIS2", "expect_currency": "EUR", "label": "XETRA",
                  "bucket": "EU_STK_XETRA"},
-    "EU_LSE": {"exchange": "LSE", "expect_currency": "USD", "label": "LSE",
+    "EU_LSE": {"exchange": "LSEETF", "expect_currency": "USD", "label": "LSE",
                "bucket": "EU_STK_LSE"},
+    # ⚑ SIX resolves, and lands OUTSIDE its own bucket. Every one of the three
+    # candidate ISINs lists on EBS as a **USD** line whose primary exchange is
+    # LSEETF; not one has a CHF line there. `EU_STK_SIX` requires CHF, so the
+    # guard refuses — correctly, on the rule as written. Whether that rule is
+    # right is a canon question and Marcel's: see the record's §7c.
     "EU_SIX": {"exchange": "EBS", "expect_currency": "CHF", "label": "SIX",
                "bucket": "EU_STK_SIX"},
 }
