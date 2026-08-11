@@ -58,11 +58,25 @@
     "EUDARK into the line's bucket is supported by what IBKR actually charged, not",
     "merely convenient. `currency_any` keeps the three apart.",
     "",
-    "⚑ DELIBERATELY EXCLUDED: AEB (Amsterdam), VSE (Vienna), BVME.ETF (Milan),",
-    "AQEUEN, TRWBIT, TRWBEN. The EUR line can route there, but they are other",
-    "countries with their own commission schedules, and folding them into a German",
-    "bucket would be the same error as calling a Gettex fill XETRA. SMART has not",
-    "used any of them in 71 trials; if it does, `runner.venue_coverage` names it."
+    "⚑ `TRWBEN` was in the excluded list until 2026-08-11 and that was an error of",
+    "mine, not a judgement that changed. I read `TRWB*` as national exchanges and",
+    "excluded the EUR one as 'Netherlands' — while already having admitted",
+    "`TRWBCH` to the Swiss selector and `TRWBUKETF` to the London one without a",
+    "second thought. They are one venue family, Tradeweb's European MTFs, and the",
+    "EUR line's member was excluded by a mislabel. The measured commission settles",
+    "it: 3 fills, all EUR 1.25, the EUR line's own home minimum, matching GETTEX2",
+    "and EUDARK on that line.",
+    "",
+    "⚑ STILL EXCLUDED, and the two groups are excluded for DIFFERENT reasons.",
+    "(a) AEB (Amsterdam), VSE (Vienna), BVME.ETF (Milan) — genuine national",
+    "exchanges in other countries with their own schedules; folding them into a",
+    "German bucket would be the error of calling a Gettex fill XETRA.",
+    "(b) AQEUEN and TRWBIT — MTFs, so arguably the same family as the ones now",
+    "admitted, and their Swiss and UK counterparts ARE in. They stay out pending a",
+    "fill: the CHF and GBP selectors took their MTFs straight from",
+    "`validExchanges` with no fill to check, which was looser than this file should",
+    "be, and the right answer to having been loose once is not to be loose again.",
+    "`runner.venue_coverage` names either the moment SMART uses it."
   ],
   "US_STK": [
     "AAPL/STK"
@@ -80,7 +94,7 @@
     "_line": "The EUR listing. German venues SMART can reach for it.",
     "patterns": ["*/STK"],
     "exchange_any": ["IBIS", "IBIS2", "GETTEX2", "FWB2", "SWB2", "EUIBSI",
-                     "EUDARK"],
+                     "EUDARK", "TRWBEN"],
     "currency_any": ["EUR"]
   },
   "EU_STK_LSE": {

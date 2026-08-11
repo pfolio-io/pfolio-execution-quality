@@ -421,3 +421,50 @@ def test_append_survives_a_store_rewritten_by_pandas(tmp_path):
     out = pd.read_parquet(store)
     assert list(out["run_id"]) == ["r1", "r2"]
     assert len(out) == 2
+
+
+def test_the_tradeweb_mtfs_are_treated_consistently_across_the_three_lines():
+    """The invariant that broke on 2026-08-11.
+
+    `TRWBCH` was admitted to the Swiss selector and `TRWBUKETF` to the London one
+    straight from `validExchanges`, while `TRWBEN` — the same venue family on the
+    EUR line — was excluded because I read it as a Netherlands *exchange*. One
+    family, three lines, two different answers, and only the missing one cost
+    fills."""
+    m = buckets.load_bucket_map()
+    tradeweb = {
+        "EU_STK_XETRA": "TRWBEN",
+        "EU_STK_LSE": "TRWBUKETF",
+        "EU_STK_SIX": "TRWBCH",
+    }
+    for bucket, venue in tradeweb.items():
+        assert venue in m[bucket].exchange_any, (
+            f"{bucket} does not accept {venue}, but its siblings accept theirs"
+        )
+
+
+def test_no_european_fill_in_the_committed_live_store_is_unmapped():
+    """The regression guard the venue discoveries earned.
+
+    GETTEX2, BATECH, EUDARK and TRWBEN each turned up only by trading, and each
+    silently dropped fills until canon caught up. This fails the moment SMART
+    uses a venue nothing can bucket — which is the signal to run the same
+    evidence check (does its commission match the line's home schedule?) rather
+    than to widen the selector reflexively."""
+    import pandas as pd
+
+    store = REPO / "order-execution" / "quality" / "results" / "trials_live.parquet"
+    if not store.exists():
+        pytest.skip("no live store")
+    df = pd.read_parquet(store)
+    if "sec_id" not in df:
+        pytest.skip("store predates the sec_id column")
+    fills = df[(df["sec_id"].notna()) & (df["status"] == "FILLED")].copy()
+    if fills.empty:
+        pytest.skip("no European fills yet")
+    fills["bucket"] = buckets.bucket_series(fills)
+    orphans = fills[fills["bucket"].isna()]
+    assert orphans.empty, (
+        "European fills that bucket nowhere: "
+        f"{sorted(orphans['exec_exchange'].dropna().unique())}"
+    )
