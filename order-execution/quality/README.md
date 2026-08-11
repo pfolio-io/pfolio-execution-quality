@@ -44,104 +44,125 @@ cells are recorded as `SKIPPED` (with `skip_reason`) rather than failed.
 | 1    | `AAPL`, `SPY`, `ES` (CME front), `EURUSD`                  |
 | 2    | `LQD`, `EFA`, `VIX` (CFE front), `CFD_USD_CHF`             |
 | 3    | `DX` (NYBOT front), `VIX_FAR` (CFE 2nd-month), `SMALL_CAP` |
-| eu   | `EU_XETRA`, `EU_LSE`, `EU_SIX`                             |
+| eu   | `EU_ETF_EUR`, `EU_ETF_GBP`, `EU_ETF_CHF` — listing lines, SMART-routed |
 
-### The European tier (added 2026-08-04)
+### The European tier
+
+*Added 2026-08-04 as three **venues**. Rebuilt 2026-08-11 as three **listing
+lines** — see "Why it stopped being about venues" below.*
 
 `broker_ibkr.json` has carried `EU_STK_XETRA`, `EU_STK_LSE` and `EU_STK_SIX`
-commission rules since 2026-05-04, and `reg_fees.json` and `tax_rules.json`
-carry the PTM levy and the two stamp duties. **Nothing had ever traded on any of
-the three**, so the execution term had no measurement — and the calculator
-returned it as `0.00 bps` inside a total that read as complete. These three cells
-are what makes it measurable. They are a separate tier because they are the only
-ones needing European market data and a European trading permission; a run
-without either should be able to skip them by name.
+commission rules since 2026-05-04, and `reg_fees.json` and `tax_rules.json` carry
+the PTM levy and the two stamp duties. **Nothing had ever traded on any of the
+three**, so the execution term had no measurement — and the calculator returned it
+as `0.00 bps` inside a total that read as complete. These cells are what makes it
+measurable. They are a separate tier because they are the only ones needing
+European market data and a European trading permission; a run without either
+should be able to skip them by name.
+
+#### The three cells
+
+| Cell | Line | Resolves to | Expected bucket |
+|------|------|-------------|-----------------|
+| `EU_ETF_EUR` | EUR, Xetra-primary | `SXR8` | `EU_STK_XETRA` |
+| `EU_ETF_GBP` | GBP, LSE-primary | `CSP1` | `EU_STK_LSE` |
+| `EU_ETF_CHF` | CHF, SIX-primary | `CHSPI` | `EU_STK_SIX` |
+
+`EU_ETF_USD` exists and is **not in the tier**: IBKR publishes no SMART listing
+for the USD line, so a user routing SMART cannot buy it.
 
 **Resolution is by ISIN, not by ticker.** A UCITS ETF trades under a different
 local ticker on every venue, and nothing here — or in the pfolio universe screen
-these funds came from — records which ticker belongs to which venue. The
-candidates in `EU_ISIN_CANDIDATES` are the largest broad-market UCITS equity ETFs
-in that screen, tried in order; the first IBKR can qualify on the venue wins, and
-which one it was is recorded per trial row.
+these funds came from — records which ticker belongs to which venue. Candidates
+are tried in order, the listing currency is a hard filter (it is the only thing
+separating the cells), and the ISIN that resolved is recorded per row in
+`sec_id`.
 
-**The exchange is explicit (`IBIS2` / `LSEETF` / `EBS`), not `SMART`.** A
-SMART-routed order records `exchange = SMART`, and the bucket for these three is
-*defined* by venue — measuring the router is not measuring the venue.
+⚑ **The EUR and GBP cells are the same fund; the CHF cell is not, and cannot be.**
+The global candidates have **zero** CHF listings between them, so the only
+natively SIX-listed CHF ETFs are Swiss-domiciled trackers. The CHF cell therefore
+measures **Swiss equity** and its spread is not comparable with the other two.
 
-⚑ **The codes are `IBIS2` and `LSEETF`** *(measured 2026-08-11; `IBIS` and `LSE`
-return error 200 for all three ISINs)*. And "measuring the router" stopped being
-a figure of speech the same day: a **SMART**-routed order in `SXR8`, a
-Xetra-**primary** ETF, executed on **`GETTEX2`** — a different German venue on a
-different fee schedule. The `exec_exchange` column records where each fill
-actually went, and the runner shouts when it disagrees with the venue requested.
+#### Why it stopped being about venues
 
-⚑ **Direct routing must be enabled for the API.** Without it every European order
-comes back `Cancelled`, unfilled, with IB error **10311** ("this order will be
-directly routed…"). The same contracts on `SMART` fill instantly — which is how
-you tell a routing block apart from a data or permission problem, and why SMART
-is not a workaround.
+The original design routed to an explicit venue — `IBIS2` / `LSEETF` / `EBS`,
+never `SMART` — because the bucket is defined by venue and a SMART fill records
+`exchange = SMART`. Two things killed that on 2026-08-11:
 
-⚑ **Only `LMT_MID` and `MKT_RAW` are usable on these venues** *(measured
-2026-08-11)*. `MIDPRICE_NATIVE` is absent from the contracts' `orderTypes`, and
-`MKT_ADAPTIVE` is refused at submit with error **442**, "specified algorithm is
-not allowed for this order" — eligibility passes it because `MKT` is listed, and
-IB rejects it anyway. A rejection costs nothing but a second.
+1. **The account cannot place directed orders at all.** Every directed order comes
+   back `Cancelled` with error **10311**, including to the very venue SMART itself
+   had just filled on. It is not a venue permission and not European.
+2. **Cost per user beat cost per venue.** No retail client directs orders, so
+   directing would price a counterfactual.
 
-⚑ **Live European runs can attract a transaction tax** (SIX and the UK both
-levy; the exemptions depend on the specific line that resolves). The live
-pre-flight banner says so; the commission estimate does not model it.
+⇒ **The European cells route `SMART`, and the bucket is keyed on where the fill
+actually executed** (`exec_exchange`, from `execution.exchange`), which
+`buckets.venue_series` prefers over `exchange`. Each bucket therefore covers the
+venues SMART can reach for that line, not a single venue. Record:
+`pfolio-hq/docs/2026-08-10-decision-eu-execution-measurement.md` §7e.
 
-**The candidate order is load-bearing** *(2026-08-10)*. `EU_ISIN_CANDIDATES` is
-tried in order on **every** venue, so the primary fund is asked for on all three
-before any of them falls through to a fallback. A chain that resolves a different
-fund per venue measures three funds on three venues, and the cross-venue
-difference is then confounded by the instrument with nothing saying so. Which
-ISIN resolved is recorded per trial in the **`sec_id`** column and printed at
-resolution time, so cross-venue comparability is a fact in the data rather than
-an assumption. Within a venue, the venue's expected currency is tried first and
-then dropped, so repeated sessions land on the same line.
+⚑ **"Measuring the router is not measuring the venue" is now measured, not
+argued**: a SMART order in `SXR8`, a Xetra-*primary* ETF, executed on `GETTEX2` —
+a different German venue on a different fee schedule. That is why `exec_exchange`
+exists.
 
-#### Running the European tier — read this before the first order
+#### Venue discovery is part of the job
+
+SMART chooses among everything in a contract's `validExchanges` — **and beyond
+it**: `EUDARK`, IB's European dark pool, took 9 of 12 live fills and appears in no
+`validExchanges` list at all. It was reachable only by trading.
+
+So after every run the harness prints **`venue_coverage`**: which venues took
+fills, which bucket each maps to, and **which have no commission rule**. A fill on
+an unpriced venue is reported, not absorbed. Growing `cost_tables/` to match is
+how the map catches up — and `cost_tables/` is canon and read-only to agents.
+
+#### Running it
 
 **1. `python -m quality.preflight` first. It places no orders and answers the
-question that costs money.** `snapshot_quote` asks for live data only. Without
-the venue's market-data subscription, `LMT_MID` is SKIPPED for free — but
-`MIDPRICE_NATIVE`, `MKT_ADAPTIVE` and `MKT_RAW` **fill and record a null
-`mid_t0`**, so `slip_vs_mid_t0_bps` is null, `bucket_strategy_matrix` drops the
-row, and the bucket stays UNMEASURED. Full commission, both legs, no
-measurement. The preflight reports, per venue: the account TWS is pointed at,
-which ISIN resolved, the bucket the trials would land in, whether a two-sided
-quote arrives, the touch **and its sizes**, the eligible strategies, and what one
-full pass would cost.
+question that costs money.** `snapshot_quote` asks for live data only. Without the
+venue's market-data subscription, `LMT_MID` is SKIPPED for free — but the others
+**fill and record a null `mid_t0`**, so `slip_vs_mid_t0_bps` is null, the row is
+dropped from the matrix, and the bucket stays UNMEASURED. Full commission, both
+legs, no measurement.
 
-**2. Three guards run before any European order**, and all three decline to
-trade rather than route around the problem:
+**2. Guards that still apply.** The pre-trade `venue_guard` is retired — under
+SMART there is no intended venue to check against. What remains:
 
 | Guard | What it stops |
 |---|---|
-| no all-venues retry (`allow_exchange_fallback=False`) | a failed venue qualification silently returning a **SMART** or other-venue contract |
-| bucket asserted pre-trade (`venue_guard`, reading `asset_class_buckets.json`) | a cell trading on the wrong venue and landing in the wrong bucket — or none |
 | `--outside-rth` refused for `EU_*` | a limit resting unfilled for its whole retry budget on a venue with no extended session |
+| account/mode gate, both directions | `--mode live` on a `DU` account, and `--mode paper` on a live one |
+| post-run position readback (live) | a batch quietly leaving a position open |
+| `venue_coverage` | a fill on a venue nothing can price |
 
 **3. Session window.** XETRA 09:00–17:30 · SIX 09:00–17:20 · LSE 08:00–16:30
-London. **All three trade only between 09:00 and 17:20 CEST**, which overlaps the
-US session by less than two hours. Holiday calendars are per venue.
+London. **All three trade only between 09:00 and 17:20 CEST.** Holiday calendars
+are per venue.
 
-**4. Commission is shaped the other way round from US.** Per-order minimums of
+**4. Which strategies actually work** *(measured live, 2026-08-11)*:
+
+| Strategy | European verdict |
+|---|---|
+| `MIDPRICE_NATIVE` | **unsupported** — absent from `orderTypes` |
+| `LMT_MID` | eligible, and **filled 0 of 4 live** — in paper it "fills" 100% of the time at the mid, which is a property of the simulator |
+| `MKT_ADAPTIVE` | 2 of 4 live. Rejected outright (error 442) on *directed* orders only |
+| `MKT_RAW` | 10 of 10 |
+
+**5. Commission is shaped the other way round from US.** Per-order minimums of
 €1.25 / £1.00 / CHF 1.50 bind at one share, so a batch costs *orders × minimum*
 and raising the notional does not reduce it. Sizing a European batch is counting
-orders. The live banner prints the per-venue figure from `broker_ibkr.json`.
+orders. ⚑ It also means `commission_bps` from this harness does not generalise —
+see the caveat under **Caveats**.
 
-**5. Convergence targets for these cells** (all three numbers already exist in
-this repo — see the Convergence target section): paper **n ≥ 10** per
-(venue × strategy) before the paper figure is usable at all; live **n ≥ 5** as
-the publication gate; live **n ≥ 20** across ≥ 5 sessions as the target. Sides
-balanced, always `--side BUY SELL`.
+⚑ **Live European runs can attract a transaction tax** (SIX and the UK both levy;
+exemptions depend on the line that resolves). The live banner says so; the
+estimate does not model it.
 
 ⚑ **Live European runs are approved per batch by Marcel, in writing, before they
 fire** (hq convention 0b(vii)). After every live run the harness reads back open
-positions and names anything the batch left open; it does not auto-correct,
-because an unattended corrective order is a second uncontrolled order.
+positions and names anything left open; it does not auto-correct, because an
+unattended corrective order is a second uncontrolled order.
 
 `SMALL_CAP` defaults to `PRIM` (Primoris Services). Swap
 `SMALL_CAP_SYMBOL` in `runner.py` if it delists or you want a different
