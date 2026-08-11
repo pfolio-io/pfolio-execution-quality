@@ -79,3 +79,31 @@ async def _get_tick_size(ib: IB, contract: Contract) -> float:
     tick = details[0].minTick
     log.info("Tick size for %s: %s", contract.symbol, tick)
     return tick
+
+
+async def _get_price_magnifier(ib: IB, contract: Contract) -> int:
+    """How many quoted units make one unit of `contract.currency`.
+
+    **1 almost everywhere, and 100 on the London lines that quote in pence** —
+    IBKR reports `currency = GBP` and then prices in GBX, so `CSP1` comes back as
+    61917 meaning GBP 619.17. Anything that divides a commission by
+    `qty × price` is then 100× out.
+
+    Found 2026-08-11 by comparing a live GBP commission against the notional it
+    was charged on. IBKR publishes the factor as `ContractDetails.priceMagnifier`,
+    so this is read rather than inferred from the currency or the venue — a
+    heuristic on 'GBP + LSE' would be a guess, and would miss the next instrument
+    that does the same thing.
+
+    ⚑ Slippage in bps is a ratio of two prices in the same units and is immune.
+    Only figures denominated in *notional* are affected."""
+    details = await ib.reqContractDetailsAsync(contract)
+    if not details:
+        raise ValueError(f"No contract details returned for {contract.symbol}")
+    magnifier = int(getattr(details[0], "priceMagnifier", 1) or 1)
+    if magnifier != 1:
+        log.info(
+            "%s quotes in 1/%d of %s — prices are magnified",
+            contract.symbol, magnifier, contract.currency,
+        )
+    return magnifier

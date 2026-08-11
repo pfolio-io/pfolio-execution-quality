@@ -48,7 +48,9 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from contract_helpers import _get_tick_size, _qualify_contract  # noqa: E402
+from contract_helpers import (  # noqa: E402
+    _get_price_magnifier, _get_tick_size, _qualify_contract,
+)
 
 import eligibility  # noqa: E402
 import order_builders  # noqa: E402
@@ -703,6 +705,7 @@ async def run_trial(
         round_trip_id: str | None = None,
         leg: str | None = None,
         sec_id: str | None = None,
+        price_magnifier: int = 1,
 ) -> dict[str, Any]:
     """Submit one strategy on one already-qualified contract and capture the
     full metrics row. `tick_size` and `order_types` are pre-fetched per
@@ -723,6 +726,10 @@ async def run_trial(
         # differs per venue, so `symbol` does not say which fund was measured
         # and a published European figure needs that on the row, not in a log.
         "sec_id": sec_id,
+        # 100 on pence-quoted London lines, 1 elsewhere. Recorded per row so
+        # anything computing a notional can divide by it; see
+        # contract_helpers._get_price_magnifier.
+        "price_magnifier": price_magnifier,
         "expiry": qualified.lastTradeDateOrContractMonth or None,
         "multiplier": qualified.multiplier or None,
         "strategy_label": strategy,
@@ -1135,7 +1142,7 @@ async def main() -> None:
         # call reqContractDetailsAsync per cell (avoids the KeyError storm
         # we saw in the earlier full sweep).
         all_rows: list[dict[str, Any]] = []
-        prepared: dict[str, tuple[Contract, float, list[str], str | None]] = {}
+        prepared: dict[str, tuple[Contract, float, list[str], str | None, int]] = {}
         for symbol in symbols:
             is_eu = symbol in EU_LINES
             try:
@@ -1147,6 +1154,7 @@ async def main() -> None:
                     ib, contract, allow_exchange_fallback=not is_eu,
                 )
                 tick_size = await _get_tick_size(ib, qualified)
+                magnifier = await _get_price_magnifier(ib, qualified)
                 order_types = await eligibility.fetch_order_types(ib, qualified)
             except Exception as e:  # noqa: BLE001
                 print(f"\n[{symbol}] resolve/qualify failed: {e}")
@@ -1159,14 +1167,16 @@ async def main() -> None:
                     f"(expect ~{EU_LINES[symbol]['expect_bucket']}; "
                     f"the venue is measured, not requested)"
                 )
-            prepared[symbol] = (qualified, tick_size, order_types, sec_id)
+            prepared[symbol] = (qualified, tick_size, order_types, sec_id,
+                                magnifier)
 
         for side in sides:
             print(f"\n#### LEG: side={side} ####")
             for symbol in symbols:
                 if symbol not in prepared:
                     continue
-                qualified, tick_size, order_types, sec_id = prepared[symbol]
+                (qualified, tick_size, order_types, sec_id,
+                 magnifier) = prepared[symbol]
                 qty = args.qty if args.qty is not None else qty_table[symbol]
                 print(
                     f"\n=== {symbol} ({side}) === secType={qualified.secType} "
@@ -1183,6 +1193,7 @@ async def main() -> None:
                         run_id=run_id, trial_idx=trial_idx, mode=args.mode,
                         outside_rth=args.outside_rth,
                         round_trip_id=rt_id, leg=entry_leg, sec_id=sec_id,
+                        price_magnifier=magnifier,
                     )
                     path = results.append_row(entry_row, mode=args.mode)
                     all_rows.append(entry_row)
@@ -1207,6 +1218,7 @@ async def main() -> None:
                             run_id=run_id, trial_idx=trial_idx, mode=args.mode,
                             outside_rth=args.outside_rth,
                             round_trip_id=rt_id, leg="exit", sec_id=sec_id,
+                            price_magnifier=magnifier,
                         )
                         path = results.append_row(exit_row, mode=args.mode)
                         all_rows.append(exit_row)
@@ -1222,7 +1234,7 @@ async def main() -> None:
 
 
 async def _report_open_positions(
-        ib: IB, prepared: dict[str, tuple[Contract, float, list[str], str | None]],
+        ib: IB, prepared: dict[str, tuple],
 ) -> None:
     """After a live run, name anything the batch left open.
 
@@ -1231,7 +1243,7 @@ async def _report_open_positions(
     are measurement trials, not positions: a residue is a thing to close, not a
     view. Read-only — it reports, it does not trade, because an automatic
     corrective order at the end of a batch is a second uncontrolled order."""
-    con_ids = {c.conId: sym for sym, (c, _, _, _) in prepared.items() if c.conId}
+    con_ids = {c.conId: sym for sym, (c, *_rest) in prepared.items() if c.conId}
     try:
         positions = await ib.reqPositionsAsync()
     except Exception as exc:  # noqa: BLE001

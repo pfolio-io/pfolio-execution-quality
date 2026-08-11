@@ -301,9 +301,26 @@ def _multiplier_int(m: Any) -> float:
         return 1.0
 
 
+def _price_magnifier(row: pd.Series) -> float:
+    """Quoted units per unit of currency; 1 when absent or unusable.
+
+    ⚑ **100 on pence-quoted London lines.** IBKR reports `currency = GBP` and
+    then quotes in GBX, so `CSP1` arrives as 61917 meaning GBP 619.17. Dividing a
+    GBP commission by that notional gives a figure 100× too small — measured
+    2026-08-11 on the first live GBP fill: 0.2 bps reported where the truth is
+    ~16. Rows written before the column existed default to 1, which is right for
+    every instrument traded until then."""
+    try:
+        value = float(row.get("price_magnifier") or 1)
+    except (TypeError, ValueError):
+        return 1.0
+    return value if value > 0 else 1.0
+
+
 def _commission_bps_row(row: pd.Series, rates: dict[str, float]) -> float:
-    """Commission as bps of notional. Notional = qty × price × multiplier
-    (multiplier defaults to 1 for non-derivatives). When commission_currency
+    """Commission as bps of notional. Notional = qty × price × multiplier ÷
+    price_magnifier (multiplier defaults to 1 for non-derivatives, magnifier to
+    1 outside the pence-quoted London lines). When commission_currency
     differs from contract.currency, both are converted to USD via the FX
     table—bps is dimensionless so any common pivot works. Returns NaN
     when commission is missing, qty/price are non-positive, or any
@@ -317,7 +334,8 @@ def _commission_bps_row(row: pd.Series, rates: dict[str, float]) -> float:
         return float("nan")
     comm_ccy = row.get("commission_currency") or ""
     contract_ccy = row.get("currency") or ""
-    notional = qty * price * _multiplier_int(row.get("multiplier"))
+    notional = (qty * price * _multiplier_int(row.get("multiplier"))
+                / _price_magnifier(row))
     if not comm_ccy or not contract_ccy:
         return float("nan")
     if comm_ccy == contract_ccy:

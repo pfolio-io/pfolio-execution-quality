@@ -299,7 +299,7 @@ Defined in `runner.py`:
 
 ## Result schema
 
-42 columns. Key groups:
+43 columns. Key groups:
 
 - **Identification**: `schema_version`, `run_id`, `trial_idx`, `timestamp_utc`
 - **Contract**: `symbol`, `secType`, `exchange`, `currency`, `conId`,
@@ -353,6 +353,21 @@ breaking changes (renames, type changes).
   "strategy not supported" from "data not available."
 - **Tiny notional only.** 1 share / 1 lot / 20000 EUR. Size effects are out
   of scope.
+- **⚑ `commission_bps` FROM THIS HARNESS DOES NOT GENERALISE, AND
+  `slip_vs_mid_t0_bps` DOES.** At one share the per-order **minimum** dominates
+  every European schedule: `CHSPI` at CHF 174 with a CHF 1.50 minimum measures
+  **86 bps** of commission, where a user trading CHF 5,000 of it pays the 6 bps
+  rate. Slippage is a ratio against the mid and is size-independent while the
+  order sits inside the displayed quote, which at these sizes it does. So the
+  slippage columns are the harness's product; the commission columns are a
+  *record of what this account was charged on these fills*, useful for correcting
+  `broker_ibkr.json` and misleading if read as a cost per user.
+- **⚑ Pence-quoted lines.** IBKR reports `currency = GBP` for London lines that
+  quote in **GBX** — `CSP1` arrives as 61917 meaning GBP 619.17. `price_magnifier`
+  (from `ContractDetails.priceMagnifier`, 100 there and 1 almost everywhere)
+  is recorded per row and divided out of every notional. Before 2026-08-11 it was
+  not, and `commission_bps` for those lines was 100× too small. Slippage was
+  never affected: it is a ratio of two prices in the same units.
 - **VWAP is opportunistic.** During pre-market or thin sessions, the
   `[t0, t_fill]` window may catch zero `AllLast` ticks; `vwap_window` will
   be null. Spec calls this out: "Null if subscription refused (level-1-only

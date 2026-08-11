@@ -149,11 +149,14 @@ def test_the_shared_instrument_key_is_the_one_both_consumers_use():
 # --------------------------------------------------------------------------- #
 
 def test_a_declared_but_untraded_class_reports_unmeasured_not_missing():
-    """`EU_STK_LSE` was the example until it started measuring on 2026-08-11.
-    Its *live* store is still empty — only paper has fills — which is exactly the
-    distinction `measurement_state` exists to draw."""
-    assert harness_data.is_declared("EU_STK_LSE")
-    assert harness_data.measurement_state("EU_STK_LSE", mode="live") == "unmeasured"
+    """⚑ `EU_STK_LSE` was the standing example twice over — until it started
+    measuring in paper on 2026-08-11 morning, and in **live** the same afternoon.
+    Both times this test failed, and both times the failure was the point. It now
+    picks a class that is genuinely unmeasured rather than naming one, so it keeps
+    asserting the behaviour as the European buckets fill up."""
+    unmeasured = _an_unmeasured_class(mode="live")
+    assert harness_data.is_declared(unmeasured)
+    assert harness_data.measurement_state(unmeasured, mode="live") == "unmeasured"
     assert harness_data.measurement_state("NOT_A_CLASS") == "undeclared"
 
 

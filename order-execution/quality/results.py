@@ -29,6 +29,11 @@ COLUMNS: list[str] = [
     # Additive and nullable, so no SCHEMA_VERSION bump — parquet append uses
     # promote=True and older rows read back as null.
     "sec_id",
+    # `price_magnifier` — quoted units per unit of currency. 100 on pence-quoted
+    # London lines, 1 everywhere else, read from ContractDetails.priceMagnifier.
+    # Added 2026-08-11: without it a GBP commission was divided by a GBX notional
+    # and every commission_bps for those lines was 100x too small.
+    "price_magnifier",
     # strategy
     "strategy_label", "eligible", "skip_reason",
     # request

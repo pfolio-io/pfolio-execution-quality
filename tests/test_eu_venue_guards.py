@@ -334,3 +334,52 @@ def test_the_committed_live_matrix_names_the_three_european_venues():
             assert row[med_cols].isna().all(axis=1).iloc[0], (
                 f"{bucket} publishes a median with n = 0"
             )
+
+
+# --------------------------------------------------------------------------- #
+# The pence bug — measured, not theorised
+# --------------------------------------------------------------------------- #
+
+def test_a_pence_quoted_line_does_not_understate_commission_by_100x():
+    """The defect as found on 2026-08-11's first live GBP fill.
+
+    IBKR reports `currency = GBP` for `CSP1` and then quotes it in GBX: the fill
+    came back at 61917, meaning GBP 619.17, and a GBP 1.00 commission on it is
+    ~16 bps. Dividing by the quoted number gave 0.16.
+    """
+    import pandas as pd
+    from quality import analyze
+
+    row = pd.Series({
+        "commission": 1.00, "commission_currency": "GBP", "currency": "GBP",
+        "filled_qty": 1.0, "avg_fill_px": 61917.0, "multiplier": None,
+        "price_magnifier": 100,
+    })
+    bps = analyze._commission_bps_row(row, {"GBP": 1.27, "USD": 1.0})
+    assert bps == pytest.approx(16.15, abs=0.1), bps
+
+    naive = row.copy()
+    naive["price_magnifier"] = 1
+    assert analyze._commission_bps_row(naive, {"GBP": 1.27, "USD": 1.0}) \
+        == pytest.approx(bps / 100, rel=1e-6)
+
+
+def test_rows_without_a_magnifier_are_unchanged():
+    """Every row written before 2026-08-11, and every non-pence instrument."""
+    import pandas as pd
+    from quality import analyze
+
+    row = pd.Series({
+        "commission": 1.00, "commission_currency": "USD", "currency": "USD",
+        "filled_qty": 100.0, "avg_fill_px": 200.0, "multiplier": None,
+    })
+    assert analyze._commission_bps_row(row, {"USD": 1.0}) == pytest.approx(0.5)
+
+
+def test_slippage_is_immune_to_the_magnifier():
+    """The measurement the exercise exists for is a ratio of two prices in the
+    same units, so the bug never touched it. Asserted so nobody 'fixes' it."""
+    from quote_snapshot import slip_vs_mid_bps
+
+    assert slip_vs_mid_bps(1, 61923.0, 61917.5) == pytest.approx(
+        slip_vs_mid_bps(1, 619.23, 619.175), rel=1e-9)
