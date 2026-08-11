@@ -64,9 +64,28 @@ candidates in `EU_ISIN_CANDIDATES` are the largest broad-market UCITS equity ETF
 in that screen, tried in order; the first IBKR can qualify on the venue wins, and
 which one it was is recorded per trial row.
 
-**The exchange is explicit (`IBIS` / `LSE` / `EBS`), not `SMART`.** A
+**The exchange is explicit (`IBIS2` / `LSEETF` / `EBS`), not `SMART`.** A
 SMART-routed order records `exchange = SMART`, and the bucket for these three is
 *defined* by venue — measuring the router is not measuring the venue.
+
+⚑ **The codes are `IBIS2` and `LSEETF`** *(measured 2026-08-11; `IBIS` and `LSE`
+return error 200 for all three ISINs)*. And "measuring the router" stopped being
+a figure of speech the same day: a **SMART**-routed order in `SXR8`, a
+Xetra-**primary** ETF, executed on **`GETTEX2`** — a different German venue on a
+different fee schedule. The `exec_exchange` column records where each fill
+actually went, and the runner shouts when it disagrees with the venue requested.
+
+⚑ **Direct routing must be enabled for the API.** Without it every European order
+comes back `Cancelled`, unfilled, with IB error **10311** ("this order will be
+directly routed…"). The same contracts on `SMART` fill instantly — which is how
+you tell a routing block apart from a data or permission problem, and why SMART
+is not a workaround.
+
+⚑ **Only `LMT_MID` and `MKT_RAW` are usable on these venues** *(measured
+2026-08-11)*. `MIDPRICE_NATIVE` is absent from the contracts' `orderTypes`, and
+`MKT_ADAPTIVE` is refused at submit with error **442**, "specified algorithm is
+not allowed for this order" — eligibility passes it because `MKT` is listed, and
+IB rejects it anyway. A rejection costs nothing but a second.
 
 ⚑ **Live European runs can attract a transaction tax** (SIX and the UK both
 levy; the exemptions depend on the specific line that resolves). The live
