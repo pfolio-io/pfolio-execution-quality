@@ -109,7 +109,7 @@ async def _quote_with_sizes(ib: IB, contract: Contract) -> tuple[
 async def check_symbol(ib: IB, symbol: str) -> VenueReport:
     """One instrument, read-only. Never raises: a failure is the finding."""
     rep = VenueReport(symbol=symbol)
-    is_eu = symbol in runner.EU_VENUES
+    is_eu = symbol in runner.EU_LINES
 
     try:
         contract, sec_id = await runner._resolve_contract(ib, symbol)
@@ -132,10 +132,11 @@ async def check_symbol(ib: IB, symbol: str) -> VenueReport:
         qualified.symbol, qualified.secType, qualified.exchange, qualified.currency,
     )
 
-    refusal = runner.venue_guard(symbol, qualified)
-    if refusal:
-        rep.detail = f"WRONG BUCKET — {refusal}"
-        return rep
+    # ⚑ No pre-trade venue check any more (E-14): these cells route SMART, so
+    # the venue is chosen at execution and is not knowable here. `rep.bucket` is
+    # what the row would bucket as if it executed where it was sent — for a SMART
+    # cell that is `None`, and correctly so. Where it really goes is reported
+    # after the run by `runner.venue_coverage`.
 
     try:
         rep.tick_size = await _get_tick_size(ib, qualified)
@@ -188,7 +189,8 @@ def render(reports: list[VenueReport]) -> str:
                 f"in {rep.currency}  conId={rep.con_id}"
                 + (f"  ISIN={rep.sec_id}" if rep.sec_id else "")
             )
-            lines.append(f"    bucket    : {rep.bucket}")
+            lines.append(
+                f"    bucket    : {rep.bucket or 'decided at fill (SMART)'}")
         if rep.tick_size is not None:
             lines.append(f"    tick      : {rep.tick_size}")
         if rep.bid is not None:
@@ -212,7 +214,7 @@ def render_batch_estimate(reports: list[VenueReport], sides: int = 2) -> str:
     the per-order minimum binds and everything else is cents. Transaction taxes
     are NOT included: SIX and the UK both levy, and whether they apply depends
     on the IBKR entity and on the line that resolved."""
-    eu = [r for r in reports if r.ok and r.symbol in runner.EU_VENUES]
+    eu = [r for r in reports if r.ok and r.symbol in runner.EU_LINES]
     if not eu:
         return "\nNo European venue is ready — no batch to price."
     try:
@@ -230,8 +232,8 @@ def render_batch_estimate(reports: list[VenueReport], sides: int = 2) -> str:
     ]
     total_trials = total_orders = 0
     for rep in eu:
-        venue = runner.EU_VENUES[rep.symbol]
-        rule = broker.get(venue["bucket"], {})
+        line = runner.EU_LINES[rep.symbol]
+        rule = broker.get(line["expect_bucket"], {})
         minimum = rule.get("min_per_order")
         ccy = rule.get("currency", "")
         trials = len(rep.eligible) * sides
@@ -240,7 +242,7 @@ def render_batch_estimate(reports: list[VenueReport], sides: int = 2) -> str:
         total_orders += orders
         cost = f"{ccy} {orders * minimum:.2f}" if minimum is not None else "?"
         lines.append(
-            f"  {venue['label']:<6}: {len(rep.eligible)} strategies × {sides} sides "
+            f"  {line['label']:<26}: {len(rep.eligible)} strategies × {sides} sides "
             f"= {trials} trials, {orders} orders → {cost}"
         )
     lines += [

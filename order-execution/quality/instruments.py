@@ -78,6 +78,7 @@ async def resolve_by_isin(
         exchange: str,
         *,
         currency: str = "",
+        require_currency: bool = False,
 ) -> "tuple[Contract, str]":
     """First of `candidates` that IBKR can qualify as a stock on `exchange`,
     with the ISIN that resolved it.
@@ -119,7 +120,14 @@ async def resolve_by_isin(
     tried = []
     # Preferred currency first, then unconstrained. Same candidate order in both
     # passes, so the primary fund still beats a fallback fund on every venue.
-    attempts = [currency, ""] if currency else [""]
+    #
+    # ⚑ `require_currency=True` drops the unconstrained second pass, making the
+    # currency a filter rather than a preference. SMART-routed cells need that:
+    # they are distinguished from each other by listing currency and by nothing
+    # else, so falling back to "any currency" would silently collapse two cells
+    # onto the same line.
+    attempts = [currency] if (currency and require_currency) else (
+        [currency, ""] if currency else [""])
     for isin, name in candidates:
         for attempt_ccy in attempts:
             template = Contract(

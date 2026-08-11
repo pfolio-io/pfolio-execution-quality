@@ -1,16 +1,22 @@
-"""The guards that stop a European cell spending money without measuring.
+"""What keeps a European trial honest once the venue is observed, not chosen.
 
     python3 -m pytest tests -q          (from the repo root)
 
 `tests/test_buckets.py` asserts that the bucket *map* can tell the three venues
-apart. This file asserts that the *runner* refuses to trade when the contract it
-resolved would not land where the run claims — and that the matrix export says
-"never measured" out loud instead of by omission.
+apart. This file asserts the layer above it: that a SMART-routed row buckets by
+**where it executed**, that a venue nobody has a commission rule for is reported
+rather than absorbed, and that the matrix says "never measured" out loud instead
+of by omission.
 
-Every European failure mode these cover has the same shape: the order still
-fills, the commission is still charged, and the measurement is still absent. That
-is why the checks are pre-trade and why they fail in the safe direction — they
-decline to trade. No IB connection, no network.
+⚑ **Rewritten 2026-08-11 for E-14.** It used to test a pre-trade `venue_guard`
+that refused to trade when the resolved contract would not land in the intended
+bucket. Under SMART there is no intended bucket before the fill — the router
+chooses at execution — so prevention became detection: `exec_exchange` decides
+the bucket, and `venue_coverage` names the venues canon cannot price. The failure
+mode being defended against is unchanged: a fill that costs money and produces
+either no measurement or one attributed to the wrong venue.
+
+No IB connection, no network.
 """
 
 from __future__ import annotations
@@ -28,108 +34,139 @@ sys.path.insert(0, str(REPO / "order-execution"))
 from quality import analyze, buckets, runner  # noqa: E402
 
 
-class _FakeContract:
-    """Just the four fields the guard reads. Avoids constructing an ib_insync
-    Contract, so the test says which fields the decision actually turns on."""
-
-    def __init__(self, symbol, secType, exchange, currency):
-        self.symbol, self.secType = symbol, secType
-        self.exchange, self.currency = exchange, currency
-
-
 # --------------------------------------------------------------------------- #
-# The venue guard
+# Bucketing from the FILL, not the request (E-14)
 # --------------------------------------------------------------------------- #
 
-def test_every_eu_venue_names_a_bucket_that_the_map_declares():
-    """The guard reads the map, so the two cannot drift — but only if the name
-    it looks up exists at all."""
+def test_every_line_expects_a_bucket_the_map_declares():
+    """`expect_bucket` is a prior for the coverage report, not a filter — but a
+    name that does not exist would make the report meaningless."""
     declared = buckets.load_bucket_map()
-    for symbol, venue in runner.EU_VENUES.items():
-        assert venue["bucket"] in declared, (
-            f"{symbol} points at bucket {venue['bucket']!r}, which "
-            f"asset_class_buckets.json does not declare"
+    for symbol, line in runner.EU_LINES.items():
+        assert line["expect_bucket"] in declared, (
+            f"{symbol} expects {line['expect_bucket']!r}, undeclared"
         )
 
 
-def test_each_venue_code_is_one_the_bucket_map_accepts():
-    """Cheap containment check. It would not have caught 2026-08-11's failure —
-    `IBIS` and `LSE` were both in `exchange_any`, and only IBKR could say that
-    neither exists — but it catches a typo, and it states the invariant that the
-    runner's venue code must be one the map can bucket."""
-    declared = buckets.load_bucket_map()
-    for symbol, venue in runner.EU_VENUES.items():
-        accepted = declared[venue["bucket"]].exchange_any
-        assert venue["exchange"] in accepted, (
-            f"{symbol} routes to {venue['exchange']!r}, which "
-            f"{venue['bucket']} does not accept: {accepted}"
-        )
+def test_a_smart_row_buckets_by_where_it_executed():
+    """The whole of E-14 in one assertion. Under SMART `exchange` is the string
+    'SMART' and says nothing; European commission varies by venue, so the bucket
+    has to name the venue that actually charged."""
+    df = pd.DataFrame([{
+        "symbol": "SXR8", "secType": "STK", "exchange": "SMART",
+        "exec_exchange": "IBIS2", "currency": "EUR", "expiry": None,
+    }])
+    assert list(buckets.bucket_series(df)) == ["EU_STK_XETRA"]
 
 
-def test_the_expected_venue_and_currency_resolve_to_the_expected_bucket():
-    for symbol, venue in runner.EU_VENUES.items():
-        got = runner.bucket_of(
-            "ANYTICKER", "STK", venue["exchange"], venue["expect_currency"],
-        )
-        assert got == venue["bucket"], (
-            f"{symbol}: {venue['exchange']}/{venue['expect_currency']} → {got}"
-        )
+def test_the_same_row_without_the_fill_venue_buckets_nowhere():
+    """The state before `exec_exchange` existed: SMART matches no EU selector,
+    so the row is unmapped rather than silently assigned. That is the failure
+    E-14 had to solve, kept as a test so it cannot come back unnoticed."""
+    df = pd.DataFrame([{
+        "symbol": "SXR8", "secType": "STK", "exchange": "SMART",
+        "exec_exchange": None, "currency": "EUR", "expiry": None,
+    }])
+    assert list(buckets.bucket_series(df)) == [None]
 
 
-def test_a_contract_that_resolved_onto_smart_is_refused():
-    """The concrete hole `_qualify_contract`'s all-venues retry used to open: a
-    SMART contract trades, records `exchange=SMART`, matches no EU selector, and
-    is dropped from the matrix — after the commission is paid."""
-    refusal = runner.venue_guard(
-        "EU_XETRA", _FakeContract("EUNL", "STK", "SMART", "EUR"),
-    )
-    assert refusal
-    assert "SMART" in refusal or "None" in refusal
+def test_rows_written_before_the_column_existed_are_unaffected():
+    """No `exec_exchange` column at all — every historical row, and the FUT/FX
+    cells where the request IS the venue."""
+    df = pd.DataFrame([
+        {"symbol": "ES", "secType": "FUT", "exchange": "CME", "currency": "USD",
+         "expiry": "20260618"},
+        {"symbol": "SPY", "secType": "STK", "exchange": "SMART", "currency": "USD",
+         "expiry": None},
+    ])
+    assert list(buckets.bucket_series(df)) == ["FUT_CME", "US_ETF"]
 
 
-def test_a_contract_that_resolved_onto_the_wrong_european_venue_is_refused():
-    """Same fund, wrong listing: it would trade, and it would land in another
-    venue's bucket — moving a published median rather than raising anything."""
-    refusal = runner.venue_guard(
-        "EU_XETRA", _FakeContract("SWDA", "STK", "LSE", "USD"),
-    )
-    assert refusal
-    assert "EU_STK_LSE" in refusal and "EU_STK_XETRA" in refusal
+def test_venue_series_prefers_the_fill_and_falls_back_to_the_request():
+    df = pd.DataFrame([
+        {"exchange": "SMART", "exec_exchange": "GETTEX2"},
+        {"exchange": "SMART", "exec_exchange": None},
+        {"exchange": "CME", "exec_exchange": ""},
+        {"exchange": "SMART", "exec_exchange": "LSEETF,CHIXCH"},
+    ])
+    assert list(buckets.venue_series(df)) == ["GETTEX2", "SMART", "CME", "LSEETF"]
 
 
-def test_the_right_contract_is_not_refused():
-    for symbol, venue in runner.EU_VENUES.items():
-        contract = _FakeContract(
-            "LOCAL", "STK", venue["exchange"], venue["expect_currency"],
-        )
-        assert runner.venue_guard(symbol, contract) == "", symbol
-
-
-def test_us_symbols_are_not_guarded():
-    """The guard exists because the EU bucket is decided by the contract. US
-    cells are decided by the ticker, and a guard there would be noise."""
-    assert runner.venue_guard("AAPL", _FakeContract("AAPL", "STK", "SMART", "USD")) == ""
+def test_us_equity_buckets_ignore_the_venue_entirely():
+    """Why SMART was always fine for the US cells: those selectors key on symbol
+    and never look at an exchange, and US commission does not vary by venue."""
+    df = pd.DataFrame([
+        {"symbol": "SPY", "secType": "STK", "exchange": "SMART",
+         "exec_exchange": v, "currency": "USD", "expiry": None}
+        for v in ("ARCA", "BATS", "IEX", "ISLAND")
+    ])
+    assert set(buckets.bucket_series(df)) == {"US_ETF"}
 
 
 # --------------------------------------------------------------------------- #
-# The RTH guard
+# The venue-coverage report — the discovery mechanism that replaced the guard
+# --------------------------------------------------------------------------- #
+
+def test_coverage_flags_a_venue_with_no_commission_rule():
+    """GETTEX2 is where SMART actually sent a Xetra-primary ETF on 2026-08-11,
+    and `broker_ibkr.json` has no rule for it. A fill there is priced by nothing;
+    this is what says so instead of leaving a hole in a total."""
+    rows = [{"status": "FILLED", "symbol": "SXR8", "secType": "STK",
+             "currency": "EUR", "exec_exchange": "GETTEX2"}]
+    cov = runner.venue_coverage(rows)
+    assert cov["GETTEX2"]["fills"] == 1
+    assert cov["GETTEX2"]["priced"] is False
+
+
+def test_coverage_confirms_a_venue_canon_can_price():
+    rows = [{"status": "FILLED", "symbol": "SXR8", "secType": "STK",
+             "currency": "EUR", "exec_exchange": "IBIS2"}]
+    cov = runner.venue_coverage(rows)
+    assert cov["IBIS2"]["bucket"] == "EU_STK_XETRA"
+    assert cov["IBIS2"]["priced"] is True
+
+
+def test_coverage_ignores_rows_that_never_filled():
+    rows = [{"status": "CANCELLED", "exec_exchange": "IBIS2"},
+            {"status": "FILLED", "exec_exchange": None}]
+    assert runner.venue_coverage(rows) == {}
+
+
+# --------------------------------------------------------------------------- #
+# Flags that survive E-14 unchanged
 # --------------------------------------------------------------------------- #
 
 def test_outside_rth_is_refused_for_european_cells():
-    refusal = runner.check_outside_rth(["EU_XETRA", "SPY"], outside_rth=True)
-    assert refusal and "EU_XETRA" in refusal
+    refusal = runner.check_outside_rth(["EU_ETF_EUR", "SPY"], outside_rth=True)
+    assert refusal and "EU_ETF_EUR" in refusal
 
 
 def test_outside_rth_is_still_allowed_for_us_only_runs():
     assert runner.check_outside_rth(["AAPL", "SPY"], outside_rth=True) == ""
-    assert runner.check_outside_rth(["EU_XETRA"], outside_rth=False) == ""
+    assert runner.check_outside_rth(["EU_ETF_EUR"], outside_rth=False) == ""
 
 
 def test_the_eu_tier_is_reachable_by_name():
     """A run without European market data must be able to skip these by name,
     and a run that wants only them must be able to ask for only them."""
-    assert set(runner._expand_instruments("eu")) == set(runner.EU_VENUES)
-    assert set(runner.EU_VENUES) <= set(runner._expand_instruments("all"))
+    assert set(runner._expand_instruments("eu")) == set(runner.TIER_EU)
+    assert set(runner.TIER_EU) <= set(runner._expand_instruments("all"))
+
+
+def test_the_usd_line_is_addressable_but_not_in_the_tier():
+    """IBKR publishes no SMART listing for it, so a user routing SMART cannot
+    buy it and a cost-per-user figure for it would price something unreachable.
+    Still nameable, so asking for it explicitly says so rather than 404s."""
+    assert "EU_ETF_USD" in runner.EU_LINES
+    assert "EU_ETF_USD" not in runner.TIER_EU
+    assert runner._expand_instruments("EU_ETF_USD") == ["EU_ETF_USD"]
+
+
+def test_the_three_cells_are_three_distinct_currencies():
+    """They are the same fund; the listing currency is the only thing separating
+    them, which is why resolution requires it rather than preferring it."""
+    ccys = [line["currency"] for line in runner.EU_LINES.values()]
+    assert sorted(ccys) == ["EUR", "GBP", "USD"]
 
 
 # --------------------------------------------------------------------------- #

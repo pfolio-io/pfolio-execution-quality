@@ -129,6 +129,27 @@ def _col(df: pd.DataFrame, name: str) -> pd.Series:
     return pd.Series("", index=df.index)
 
 
+def venue_series(df: pd.DataFrame) -> pd.Series:
+    """The venue each row should be bucketed by: **where it executed** when that
+    is known, else the exchange it was sent to.
+
+    **Why the fill wins** *(2026-08-11, E-14)*. The European cells route SMART, so
+    their `exchange` column reads `SMART` and says nothing — while European
+    commission genuinely varies by venue, so the bucket has to name the venue that
+    actually charged. `exec_exchange` carries it, from `execution.exchange`.
+
+    Falling back to `exchange` keeps three things working unchanged: every row
+    written before the column existed, the FUT/FX cells (one venue each, so the
+    request *is* the venue), and the US equity cells, whose selectors key on
+    symbol and never look at a venue at all.
+
+    A multi-venue fill records them comma-joined; the first is used, and
+    `check_ambiguity` is what would surface a row split across venues that bucket
+    differently."""
+    exec_x = _col(df, "exec_exchange").str.split(",").str[0].str.strip()
+    return exec_x.where(exec_x != "", _col(df, "exchange"))
+
+
 def bucket_series(df: pd.DataFrame, bucket_map: Optional[dict[str, Selector]] = None) -> pd.Series:
     """One bucket name (or None) per row, using exchange and currency when the
     selector asks for them."""
@@ -137,7 +158,7 @@ def bucket_series(df: pd.DataFrame, bucket_map: Optional[dict[str, Selector]] = 
         return pd.Series([None] * len(df), index=df.index, dtype=object)
 
     keys = instrument_key(df)
-    exchanges, currencies = _col(df, "exchange"), _col(df, "currency")
+    exchanges, currencies = venue_series(df), _col(df, "currency")
 
     def assign(i) -> Optional[str]:
         k, x, c = keys[i], exchanges[i], currencies[i]
@@ -157,7 +178,7 @@ def rows_for(df: pd.DataFrame, asset_class: str,
     if sel is None or df.empty:
         return df.iloc[0:0]
     keys = instrument_key(df)
-    exchanges, currencies = _col(df, "exchange"), _col(df, "currency")
+    exchanges, currencies = venue_series(df), _col(df, "currency")
     mask = pd.Series(
         [sel.matches_row(keys[i], exchanges[i], currencies[i]) for i in df.index],
         index=df.index,
@@ -178,7 +199,7 @@ def check_ambiguity(df: pd.DataFrame,
     if df.empty or not bucket_map:
         return {}
     keys = instrument_key(df)
-    exchanges, currencies = _col(df, "exchange"), _col(df, "currency")
+    exchanges, currencies = venue_series(df), _col(df, "currency")
     out: dict[str, list[str]] = {}
     for i in df.index:
         hits = [n for n, s in bucket_map.items()
