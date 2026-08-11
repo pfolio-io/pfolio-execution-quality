@@ -107,22 +107,51 @@ def append_row(row: dict[str, Any], mode: str = "paper") -> Path:
 
 
 def _append_parquet(path: Path, row: dict[str, Any]) -> None:
+    """Append one row, tolerating a store whose column TYPES differ from ours.
+
+    ⚑ **This has already cost a live fill.** On 2026-08-11 a maintenance script
+    rewrote the stores through `pandas.to_parquet`, which encodes strings as
+    `large_string` and an all-integer column as `double`. `Table.from_pylist`
+    produces `string` and `int64`. `promote_options="default"` refuses both
+    pairings, so `append_row` raised **after the order had filled** — the trial
+    was lost, and because the exception unwound past the auto-flatten the run
+    left an open position on a live account.
+
+    The lesson is not "do not use pandas": it is that the append path must
+    survive a store written by anything other than itself, because sooner or
+    later one will be. `promote_options="permissive"` unifies string widths and
+    int/float widths; the stricter mode is kept as the first attempt so ordinary
+    schema growth still goes through the narrow path.
+    """
     import pyarrow as pa
     import pyarrow.parquet as pq
 
     new_table = pa.Table.from_pylist([row])
     if path.exists():
         existing = pq.read_table(path)
-        # Tolerate schema growth: missing columns on either side become null.
-        try:
-            combined = pa.concat_tables(
-                [existing, new_table], promote_options="default"
-            )
-        except TypeError:
-            combined = pa.concat_tables([existing, new_table], promote=True)
+        combined = _concat_tolerantly(pa, existing, new_table)
     else:
         combined = new_table
     pq.write_table(combined, path)
+
+
+def _concat_tolerantly(pa, existing, new_table):
+    """`default` promotion first, then `permissive`, then the pre-14.0 kwarg.
+
+    ⚑ `pa.lib.ArrowTypeError` **subclasses `TypeError`**, so the except clauses
+    have to be ordered narrowest-first or the Arrow error is swallowed by the
+    handler meant for the old-pyarrow signature — which is exactly the bug that
+    ate the first attempt at this fix.
+    """
+    last: Exception | None = None
+    for options in ("default", "permissive"):
+        try:
+            return pa.concat_tables([existing, new_table], promote_options=options)
+        except pa.lib.ArrowTypeError as exc:      # narrower than TypeError
+            last = exc
+        except TypeError:                          # pyarrow < 14: no such kwarg
+            return pa.concat_tables([existing, new_table], promote=True)
+    raise last
 
 
 def _append_csv(path: Path, row: dict[str, Any]) -> None:

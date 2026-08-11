@@ -383,3 +383,41 @@ def test_slippage_is_immune_to_the_magnifier():
 
     assert slip_vs_mid_bps(1, 61923.0, 61917.5) == pytest.approx(
         slip_vs_mid_bps(1, 619.23, 619.175), rel=1e-9)
+
+
+# --------------------------------------------------------------------------- #
+# The append path must survive a store written by something else
+# --------------------------------------------------------------------------- #
+
+def test_append_survives_a_store_rewritten_by_pandas(tmp_path):
+    """⚑ Regression for a defect that cost a live fill on 2026-08-11.
+
+    A maintenance script rewrote the trial stores through `pandas.to_parquet`,
+    which encodes strings as `large_string` and an all-integer column as
+    `double`. `Table.from_pylist` produces `string` and `int64`, and
+    `concat_tables(promote_options="default")` refuses both pairings — so
+    `append_row` raised AFTER the order had filled. The trial was lost and, worse,
+    the exception unwound past auto-flatten and left a position open on a live
+    account.
+
+    The store must therefore tolerate being written by something other than the
+    harness, because sooner or later it will be.
+    """
+    import pandas as pd
+    from quality import results
+
+    store = tmp_path / "trials_paper.parquet"
+    first = {c: None for c in results.COLUMNS}
+    first.update({"run_id": "r1", "symbol": "SXR8", "conId": 1,
+                  "price_magnifier": 1, "status": "FILLED"})
+    results._append_parquet(store, first)
+
+    # the round trip that broke it
+    pd.read_parquet(store).to_parquet(store, index=False)
+
+    second = dict(first, run_id="r2")
+    results._append_parquet(store, second)          # must not raise
+
+    out = pd.read_parquet(store)
+    assert list(out["run_id"]) == ["r1", "r2"]
+    assert len(out) == 2
