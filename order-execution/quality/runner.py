@@ -93,6 +93,10 @@ class SubmitResult:
     commission_currency: str = ""
     realized_pnl_total: float = 0.0
     exec_ids: str = ""
+    #: Venue(s) the fills actually executed on, comma-joined, from
+    #: `execution.exchange`. NOT the exchange that was requested — see
+    #: `_exec_exchanges`.
+    exec_exchange: str = ""
     notes: str = ""
 
 
@@ -424,6 +428,27 @@ async def _wait_for_commission_reports(trade: Trade, timeout_s: float) -> None:
         await asyncio.sleep(0.1)
 
 
+def _exec_exchanges(trade: Trade) -> str:
+    """Where the fills actually executed, comma-joined, in order of appearance.
+
+    ⚑ **This is not the same thing as the exchange that was requested**, and on
+    2026-08-11 the difference was measured rather than imagined: a SMART-routed
+    order in `SXR8` — a Xetra-primary ETF — executed on **`GETTEX2`**, a different
+    German venue with a different fee schedule. Had the row been attributed by
+    the requested exchange, a Gettex fill would have been published as XETRA and
+    priced against XETRA's commission rule.
+
+    Direct routing keeps the two identical, which is exactly why the European
+    cells route directly. This column is what proves it stayed true, and it is
+    the only field that would catch a silent re-route."""
+    seen: list[str] = []
+    for f in trade.fills:
+        venue = getattr(getattr(f, "execution", None), "exchange", "") or ""
+        if venue and venue not in seen:
+            seen.append(venue)
+    return ",".join(seen)
+
+
 def _extract_commissions(trade: Trade) -> tuple[float, str, list[str], float]:
     """Sum commissions and realized P&L across fills.
     Returns (commission_total, currency, exec_ids, realized_pnl_total).
@@ -475,6 +500,7 @@ async def _submit_simple(
         commission_currency=comm_ccy,
         realized_pnl_total=realized,
         exec_ids=",".join(exec_ids),
+        exec_exchange=_exec_exchanges(trade),
         notes=_collect_trade_notes(trade),
     )
 
@@ -501,6 +527,7 @@ async def _submit_lmt_mid_with_retries(
     comm_ccy = ""
     realized_total = 0.0
     exec_ids_all: list[str] = []
+    exec_venues: list[str] = []
 
     for attempt in range(LMT_MID_RETRY_COUNT):
         q = await snapshot_quote(ib, contract)
@@ -526,6 +553,9 @@ async def _submit_lmt_mid_with_retries(
             if not comm_ccy:
                 comm_ccy = t_ccy
             exec_ids_all.extend(t_ids)
+            for v in _exec_exchanges(trade).split(","):
+                if v and v not in exec_venues:
+                    exec_venues.append(v)
         n_fills_total += len(trade.fills)
         attempt_notes = _collect_trade_notes(trade)
         if attempt_notes:
@@ -544,6 +574,7 @@ async def _submit_lmt_mid_with_retries(
         commission_currency=comm_ccy,
         realized_pnl_total=realized_total,
         exec_ids=",".join(exec_ids_all),
+        exec_exchange=",".join(exec_venues),
         notes=" | ".join(notes_all),
     )
 
@@ -688,11 +719,19 @@ async def run_trial(
         "commission": result.commission_total if result.filled_qty > 0 else None,
         "commission_currency": result.commission_currency or None,
         "exec_ids": result.exec_ids or None,
+        "exec_exchange": result.exec_exchange or None,
         "realized_pnl": (
             result.realized_pnl_total if result.filled_qty > 0 else None
         ),
         "notes": result.notes or None,
     })
+
+    # ⚑ Did it execute where we sent it? Direct routing should make these equal.
+    # A disagreement means the row's bucket is a claim about a venue the trade
+    # did not happen on — loud, because it moves a published median silently.
+    if result.exec_exchange and result.exec_exchange != qualified.exchange:
+        print(f"    ⚑ ROUTED AWAY: requested {qualified.exchange!r}, executed on "
+              f"{result.exec_exchange!r} — this row's bucket names the wrong venue")
 
     # T_fill snapshot
     q_fill: Quote | None = await snapshot_quote(ib, qualified)

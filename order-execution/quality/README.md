@@ -280,7 +280,7 @@ Defined in `runner.py`:
 
 ## Result schema
 
-41 columns. Key groups:
+42 columns. Key groups:
 
 - **Identification**: `schema_version`, `run_id`, `trial_idx`, `timestamp_utc`
 - **Contract**: `symbol`, `secType`, `exchange`, `currency`, `conId`,

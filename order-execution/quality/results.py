@@ -45,6 +45,14 @@ COLUMNS: list[str] = [
     "paper_account", "session", "ib_server_version",
     # commission (raw IB commissionReport data; analyze.py normalizes to bps)
     "commission", "commission_currency", "exec_ids",
+    # `exec_exchange` — where the fills ACTUALLY executed, from
+    # `execution.exchange`, not the exchange that was requested. Added
+    # 2026-08-11 after a measured surprise: a SMART-routed order in a
+    # Xetra-primary ETF executed on GETTEX2, so attributing by the requested
+    # exchange would have published a Gettex fill as XETRA and priced it against
+    # XETRA's commission rule. Direct routing keeps the two equal; this column
+    # is what proves it, and the only field that would catch a silent re-route.
+    "exec_exchange",
     # realized P&L from commissionReport.realizedPNL on closing fills,
     # in commission_currency. NOTE: IB computes this against the
     # *account's* position average cost basis at fill time—NOT against
