@@ -140,14 +140,23 @@ SMART there is no intended venue to check against. What remains:
 London. **All three trade only between 09:00 and 17:20 CEST.** Holiday calendars
 are per venue.
 
-**4. Which strategies actually work** *(measured live, 2026-08-11)*:
+**4. Which strategies actually work** *(entry legs, live, cumulative over
+2026-08-11 and 2026-08-12 — 24 entries per eligible strategy)*:
 
 | Strategy | European verdict |
 |---|---|
-| `MIDPRICE_NATIVE` | **unsupported** — absent from `orderTypes` |
-| `LMT_MID` | eligible, and **filled 0 of 4 live** — in paper it "fills" 100% of the time at the mid, which is a property of the simulator |
-| `MKT_ADAPTIVE` | 2 of 4 live. Rejected outright (error 442) on *directed* orders only |
-| `MKT_RAW` | 10 of 10 |
+| `MIDPRICE_NATIVE` | **unsupported** — absent from `orderTypes`. 6 of 6 SKIPPED, both sessions |
+| `LMT_MID` | eligible, **14 of 24 (58%)**. In paper it "fills" 100% of the time at the mid, which is a property of the simulator |
+| `MKT_ADAPTIVE` | **12 of 24 (50%)**. Rejected outright (error 442) on *directed* orders only |
+| `MKT_RAW` | **24 of 24 (100%)** |
+
+⚑ **`LMT_MID` "filled 0 of 4 live" was this table's figure until 2026-08-12, and
+it was wrong as a verdict rather than as arithmetic** — it was true of the four
+entries then in the store, and generalised from them. At 24 entries the two
+limit-style strategies fill roughly half the time, which is a different
+operational conclusion: a European batch should expect to buy ~50% of its
+`LMT_MID` and `MKT_ADAPTIVE` cells per pass, not zero. The unfilled ones cost
+nothing but the retry budget. Non-fills are `TIMEOUT`, never partial.
 
 **5. Commission is shaped the other way round from US.** Per-order minimums of
 €1.25 / £1.00 / CHF 1.50 bind at one share, so a batch costs *orders × minimum*
@@ -383,12 +392,49 @@ breaking changes (renames, type changes).
   slippage columns are the harness's product; the commission columns are a
   *record of what this account was charged on these fills*, useful for correcting
   `broker_ibkr.json` and misleading if read as a cost per user.
+- **⚑ THE PRIMARY EXCHANGES CHARGE ABOVE THE MODELLED MINIMUM; THE MTFs AND THE
+  DARK POOL CHARGE IT EXACTLY.** Measured over 100 live European fills across both
+  sessions, and the split is clean:
+
+  | Venue | Charged | `broker_ibkr.json` min | n |
+  |---|---|---|---|
+  | `EUDARK` · `GETTEX2` · `TRWBCH` · `TRWBUKETF` · `TRWBEN` | exactly 1.25 / 1.00 / 1.50 | same | 77 |
+  | `IBIS2` (Xetra) | EUR 1.276–1.302 | 1.25 | 10 |
+  | `LSEETF` (LSE) | GBP 1.16 | 1.00 | 8 |
+  | `BATECH` | CHF 1.531 | 1.50 | 1 |
+  | **`EBS` (SIX)** | **CHF 3.58** | **1.50** | 4 |
+
+  `EBS` is **2.39× the modelled minimum** and is the one that matters: at one share
+  the minimum binds, so a SIX fill that lands on the primary costs CHF 3.58 where
+  `broker_ibkr.json` predicts CHF 1.50. **Not fixed here — `cost_tables/` is canon
+  and read-only to agents** (S1-33), and this is reported for the same reason
+  `EUDARK` and `TRWBEN` were reported rather than added.
+
+  ⚑ **What is NOT known is whether the excess is a flat add-on or a rate**, because
+  every fill in the store is at one share. A flat CHF 2.08 exchange fee and a
+  percentage component are indistinguishable at a single notional, and they imply
+  opposite corrections at a user's size. Settling it needs fills at a second
+  notional — a different experiment, with its own cost, and Marcel's call.
 - **⚑ Pence-quoted lines.** IBKR reports `currency = GBP` for London lines that
   quote in **GBX** — `CSP1` arrives as 61917 meaning GBP 619.17. `price_magnifier`
   (from `ContractDetails.priceMagnifier`, 100 there and 1 almost everywhere)
   is recorded per row and divided out of every notional. Before 2026-08-11 it was
   not, and `commission_bps` for those lines was 100× too small. Slippage was
   never affected: it is a ratio of two prices in the same units.
+- **⚑ The SMART book crosses, and `spread_t0_bps` goes negative when it does.**
+  4 of 100 quoted European rows carry a **negative** spread — bid above ask — and
+  8 more carry exactly zero. Every crossed one is `SXR8`, on both sessions
+  (−0.276 bps on 08-11, −0.553 bps on 08-12), so it is a property of that line and
+  not a one-off. The cause is structural: SMART aggregates across venues with no
+  consolidated tape and no locked/crossed protection, so one venue's bid can sit
+  above another's ask for the moment the snapshot is taken. `mid_t0` is still the
+  midpoint of those two prices and is not obviously wrong, but two things break:
+  the **"MKT_RAW slippage ≈ half the spread" sanity check is meaningless** on those
+  rows, and a crossed mid can show price improvement on *both* legs of a round
+  trip, which is arithmetic rather than execution quality. At 4% of rows and with
+  the signs going both ways (+0.414, −0.277) it does not move a median; it is left
+  in the store, flagged here, and worth filtering explicitly before any published
+  spread statistic.
 - **VWAP is opportunistic.** During pre-market or thin sessions, the
   `[t0, t_fill]` window may catch zero `AllLast` ticks; `vwap_window` will
   be null. Spec calls this out: "Null if subscription refused (level-1-only
