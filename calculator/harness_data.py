@@ -78,6 +78,62 @@ def _filter_by_asset_class(df: pd.DataFrame, asset_class: str) -> pd.DataFrame:
     return buckets.rows_for(df, asset_class, _load_buckets())
 
 
+def fill_attempts_by_strategy(
+        asset_class: str, strategy: str, mode: str = "paper",
+) -> dict[str, int]:
+    """Entry-leg `(filled, attempts)` for `asset_class × strategy`.
+
+    ⚑ **Attempts cannot be counted per bucket directly, and `coverage_by_strategy`
+    silently does not.** A bucket is keyed on where the fill executed
+    (`exec_exchange`), so an order that never filled has no venue, matches no
+    selector, and drops out of `rows_for` entirely. The denominator that comes
+    back is therefore *fills*, not attempts — `EU_STK_SIX × LMT_MID` reports
+    "1 of 1" for a cell that actually timed out 7 times out of 8. Any fill rate
+    computed from it is 100% by construction, which is the one answer that is
+    never interesting.
+
+    So attempts are counted at the **instrument line** instead: take the
+    instruments that produced this bucket's fills, then count every entry-leg
+    row for those instruments, filled or not. That is well defined — an
+    unfilled `CHSPI` order is unambiguously an attempt on the Swiss line even
+    though it reached no venue — and it is the denominator a reader means when
+    they ask how often the strategy actually executes.
+
+    Returns `{"filled": int, "attempts": int}`; `attempts` is 0 when nothing
+    in this class has ever filled, since with no fills there is no line to
+    attribute attempts to.
+    """
+    try:
+        df = _load_trials(mode)
+    except FileNotFoundError:
+        return {"filled": 0, "attempts": 0}
+    if df.empty or "symbol" not in df.columns:
+        return {"filled": 0, "attempts": 0}
+
+    in_bucket = _filter_by_asset_class(df, asset_class)
+    if in_bucket.empty:
+        return {"filled": 0, "attempts": 0}
+
+    keys = set(buckets.instrument_key(
+        in_bucket[in_bucket["status"] == "FILLED"]
+    ).unique())
+    if not keys:
+        return {"filled": 0, "attempts": 0}
+
+    rows = df[buckets.instrument_key(df).isin(keys)]
+    leg = (rows["leg"] if "leg" in rows.columns
+           else pd.Series(pd.NA, index=rows.index, dtype="object"))
+    rows = rows[(rows["strategy_label"] == strategy)
+                & (leg.isna() | (leg == "entry"))
+                # SKIPPED is ineligibility, not a failure to execute. Counting
+                # it would make every unsupported strategy look like one that
+                # tries and misses.
+                & (rows["status"] != "SKIPPED")]
+    filled = rows[(rows["status"] == "FILLED")
+                  & rows["slip_vs_mid_t0_bps"].notna()]
+    return {"filled": int(len(filled)), "attempts": int(len(rows))}
+
+
 def median_slip_bps_by_strategy(
         asset_class: str, strategy: str, mode: str = "paper",
 ) -> Optional[float]:

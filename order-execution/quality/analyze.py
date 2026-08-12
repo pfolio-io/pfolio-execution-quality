@@ -181,11 +181,53 @@ def bucket_strategy_matrix(df: pd.DataFrame) -> pd.DataFrame:
     wide_med = grouped.pivot(index="bucket", columns="strategy_label", values="median_bps").round(4)
     wide_n = grouped.pivot(index="bucket", columns="strategy_label", values="n").fillna(0).astype(int)
 
+    # ⚑ `_n` counts BOTH legs; `_entry_n` counts entry legs only, and the two
+    # disagree by ~3.5x on MKT_RAW in every bucket.
+    #
+    # Auto-flatten exits are always MKT_RAW, so only that strategy accumulates
+    # exit legs — every other strategy's `_n` is already entry-only. A reader
+    # comparing "MKT_RAW n=28" against "LMT_MID n=8" therefore reads a 3.5x
+    # confidence difference that is an artifact of the test fixture, not of
+    # sampling. An exit leg is a real market-order execution, but it is not an
+    # independent sample of *choosing* MKT_RAW: its side is fixed by whatever
+    # entry preceded it and it fires seconds later. `cost_model.py` already
+    # excludes them for exactly this reason ("a harness test-fixture choice, not
+    # a user pattern") and counts entry legs only — so the calculator and this
+    # matrix have been reporting different n for the same store.
+    #
+    # Published values are deliberately NOT changed here. Switching `_n` and
+    # `_median_bps` to the entry-only basis moves US_STK's MKT_RAW median from
+    # -0.264 to +0.527 — a SIGN FLIP on an already-published figure, from price
+    # improvement to cost — and US_ETF by 0.233. That is a call about a public
+    # number, not a reconciliation, so it is surfaced rather than taken.
+    # `leg` may be absent entirely: the schema is forward-compatible (parquet
+    # append uses promote=True) and pre-auto-flatten stores predate the column.
+    leg = (fills["leg"] if "leg" in fills.columns
+           else pd.Series(pd.NA, index=fills.index, dtype="object"))
+    entry_only = fills[leg.isna() | (leg == "entry")]
+    entry_n = (
+        entry_only.groupby(["bucket", "strategy_label"])[PRIMARY_METRIC].count()
+        .unstack(fill_value=0)
+        .reindex(index=wide_n.index, columns=wide_n.columns, fill_value=0)
+        .fillna(0).astype(int)
+    )
+
     # Interleave median + n columns per strategy for easier reading.
     out = pd.DataFrame(index=wide_med.index)
     for strat in sorted(wide_med.columns):
         out[f"{strat}_median_bps"] = wide_med[strat]
         out[f"{strat}_n"] = wide_n[strat]
+        out[f"{strat}_entry_n"] = entry_n[strat]
+
+    divergent = sorted({
+        strat for strat in wide_med.columns
+        if (wide_n[strat] != entry_n[strat]).any()
+    })
+    if divergent:
+        print(f"[matrix] ⚑ `_n` includes auto-flatten exit legs and `_entry_n` "
+              f"does not; they differ for: {divergent}. The calculator uses the "
+              f"entry-only basis.")
+
     return _with_unmeasured_rows(out, absent).reset_index()
 
 

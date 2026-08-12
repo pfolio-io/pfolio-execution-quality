@@ -132,6 +132,17 @@ class CostBreakdown:
             f"{self.total_value_base_ccy:>12.4f}  {self.total_bps:>8.2f}  "
             f"({self.input.base_currency} on {self.notional_base_ccy:,.2f} notional)"
         )
+        # `CostLine.note` was rendered by nothing — not this table, not
+        # tool/src, not the wireframe — so every caveat written into one since
+        # the field existed has been invisible, including the price-improvement
+        # cap note. A caveat nobody can read is the same as no caveat, and these
+        # are exactly the lines where the number alone misleads.
+        noted = [l for l in self.lines if l.note]
+        if noted:
+            rows.append("")
+            rows.append("notes:")
+            for l in noted:
+                rows.append(f"    · {l.label}: {l.note}")
         if not self.is_complete:
             rows.append("")
             rows.append(
@@ -430,13 +441,38 @@ def _slippage_cost(
         paper_note = (
             "paper sim is not actionable for LMT/MIDPRICE—switch to mode=live"
         ) if harness_mode == "paper" else ""
-        note = "; ".join(n for n in (cap_note, paper_note) if n)
+        # ⚑ A slippage median is CONDITIONAL ON HAVING FILLED, and for the
+        # limit-style strategies that condition is often false. `LMT_MID` is the
+        # default strategy and fills 12% of attempts on EU_STK_SIX, 62% on
+        # EU_STK_LSE and 100% on EU_STK_XETRA — yet all three price at 0.00 bps,
+        # because a mid-limit only fills WHEN IT GETS THE MID, so its measured
+        # slippage is ~0 by construction and the cap floors the rest.
+        #
+        # That is the failure this whole line item exists to prevent, in a new
+        # form: before the European harness ran, these buckets published 0.00 bps
+        # because nothing had ever traded them. They now publish 0.00 bps from a
+        # real measurement of the one strategy that mostly does not execute. The
+        # model has no notion of fill probability and cannot price the unfilled
+        # attempts, so the honest move is to make the denominator visible next to
+        # the number rather than to invent a haircut.
+        fa = harness_data.fill_attempts_by_strategy(
+            inp.asset_class, strategy, mode=harness_mode,
+        )
+        attempts, filled = fa["attempts"], fa["filled"]
+        rate_note = (
+            f"filled {filled} of {attempts} attempts "
+            f"({filled / attempts:.0%}) — this figure is conditional on "
+            f"filling; the unfilled attempts are not priced here"
+        ) if attempts and filled < attempts else ""
+        note = "; ".join(n for n in (cap_note, rate_note, paper_note) if n)
+        n_txt = (f"n={cov['with_slip']} of {attempts} attempts"
+                 if attempts else f"n={cov['with_slip']}")
         return CostLine(
             label=f"slippage [{leg_label}, {strategy}]",
             value_base_ccy=notional_base * capped_bps / 1e4,
             bps_of_notional=capped_bps,
             source=f"harness({harness_mode}).median slip_vs_mid_t0_bps "
-                   f"[n={cov['with_slip']}]",
+                   f"[{n_txt}]",
             side=leg_label,
             note=note,
         )
