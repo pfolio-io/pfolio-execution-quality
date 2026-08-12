@@ -258,3 +258,66 @@ def test_strategy_has_no_default_so_nobody_prices_against_the_wrong_order_type()
         cost_model.CostInput(
             symbol="AAPL", asset_class="US_STK", side="BOTH", qty=1, price=1,
         )
+
+
+def test_swiss_stamp_duty_is_charged_only_to_a_swiss_broker():
+    """`tax_rules.json` has carried `broker_swiss_only: true` on CH since it was
+    written, because the Umsatzabgabe is levied only when a party to the trade is
+    a Swiss securities dealer. `_transaction_tax` never read the flag, so the
+    duty was charged to everyone: 15 bps per leg, both legs, 30 of the 42 bps the
+    model returned for a Swiss round-trip — about 71% of the quote.
+
+    While the answer was unknown that was at least conservative. It stopped being
+    conservative on 2026-08-12, when the account was confirmed to trade through
+    IB UK (E-9): from then the model was simply wrong, in the expensive
+    direction, on the venue whose measurement had cost the most to obtain.
+
+    Guards both directions, because a flag that is read but always false is the
+    same bug wearing a condition.
+    """
+    def total(swiss: bool) -> float:
+        return cost_model.compute_cost(cost_model.CostInput(
+            symbol="X", asset_class="EU_STK_SIX", side="BOTH", qty=30,
+            price=173.0, strategy="MKT_RAW", broker_is_swiss=swiss,
+        ), harness_mode="live").total_bps
+
+    non_swiss, swiss = total(False), total(True)
+    assert swiss > non_swiss, "broker_swiss_only is being ignored again"
+    assert swiss - non_swiss == pytest.approx(30.0, abs=0.5), (
+        "CH duty should be 15 bps on each of two legs"
+    )
+    assert cost_model.CostInput(
+        symbol="X", asset_class="EU_STK_SIX", side="BOTH", qty=1, price=1,
+        strategy="MKT_RAW",
+    ).broker_is_swiss is False, "the safe default must be non-Swiss"
+
+
+def test_eu_commission_minimums_are_the_measured_routing_weighted_charge():
+    """`min_per_order` for the three EU buckets is no longer the published
+    schedule minimum but the routing-weighted charge measured over 137 live
+    SMART fills. The largest correction is SIX: EBS, the primary, charges
+    CHF 3.58 against a schedule 1.50 on 7 of 7 fills with zero variance.
+
+    Pinned because these are the only hand-written numbers in `broker_ibkr.json`
+    that came from measurement rather than a published schedule, and a future
+    refresh from the IBKR pricing page would quietly restore the schedule values
+    and silently under-state the Swiss line by 29%. `_min_per_order_schedule`
+    keeps the published figure beside each so the two are never confused.
+    """
+    import json
+    rules = json.loads((
+        Path(__file__).resolve().parents[1] / "order-execution" / "quality"
+        / "cost_tables" / "broker_ibkr.json"
+    ).read_text())
+
+    expected = {"EU_STK_XETRA": (1.2636, 1.25),
+                "EU_STK_LSE": (1.0343, 1.0),
+                "EU_STK_SIX": (1.9291, 1.5)}
+    for bucket, (measured, schedule) in expected.items():
+        rule = rules[bucket]
+        assert rule["min_per_order"] == pytest.approx(measured), bucket
+        assert rule["_min_per_order_schedule"] == pytest.approx(schedule), bucket
+        assert rule["min_per_order"] >= rule["_min_per_order_schedule"], (
+            f"{bucket}: measured charge below schedule minimum is not possible"
+        )
+        assert rule["_min_per_order_measured_n"] > 0, bucket

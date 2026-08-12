@@ -69,6 +69,17 @@ class CostInput:
     jurisdiction: Optional[str] = None
     holding_days: int = 0
     contract_currency: Optional[str] = None  # defaults to base_currency
+    #: Is the executing broker a Swiss securities dealer? Swiss stamp duty
+    #: (Umsatzabgabe) is levied only when at least one party to the trade is
+    #: one — `tax_rules.json` has recorded that as `broker_swiss_only: true`
+    #: since it was written, and `_transaction_tax` never read it, so the duty
+    #: was charged unconditionally.
+    #:
+    #: Defaults to False because that is the answer for this account and the
+    #: common one for our users: Marcel confirmed 2026-08-12 that the account
+    #: trades through IB UK, which is not a Swiss securities dealer (decision
+    #: record E-9, discharged). A caller who IS with a Swiss broker sets it.
+    broker_is_swiss: bool = False
 
 
 @dataclass
@@ -345,6 +356,23 @@ def _transaction_tax(inp: CostInput, tables: CostTables) -> list[CostLine]:
     rule_set = tables.tax_rules.get(juris)
     if not rule_set or not rule_set.get("stk_tax"):
         return []
+
+    # ⚑ The condition the rule has always carried and nothing ever read.
+    # `tax_rules.json` records `broker_swiss_only: true` on CH, because Swiss
+    # stamp duty is levied only when a party to the trade is a Swiss securities
+    # dealer. `_transaction_tax` never looked at the flag, so the duty was
+    # charged to everyone — 15 bps per leg, BOTH legs, which was 30 of the
+    # 42 bps this model returned for a Swiss round-trip. Roughly 71% of the
+    # quoted cost was a tax that does not apply to us.
+    #
+    # While the answer was unknown the over-charge was at least conservative.
+    # It stopped being conservative on 2026-08-12, when Marcel confirmed the
+    # account trades through IB UK (E-9): from that point the model was simply
+    # wrong, in the expensive direction, on the venue whose measurement had
+    # just cost the most to obtain.
+    if rule_set.get("broker_swiss_only") and not inp.broker_is_swiss:
+        return []
+
     rule = rule_set["stk_tax"]
     ccy = rule.get("currency", inp.base_currency)
     notional_native = inp.qty * inp.price * inp.multiplier

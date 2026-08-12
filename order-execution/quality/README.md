@@ -123,6 +123,43 @@ entries against exits and check net exposure per line — rather than trusting t
 someone read the output. Sizing a batch is not only counting orders; it is also
 asking who is watching when it ends.
 
+#### What the study produced — the numbers it exists for
+
+*Closed out 2026-08-12. Round-trip, `MKT_RAW`, Irish-domiciled UCITS ETF, no
+stamp duty (see below), commission at the measured routing-weighted charge.*
+
+| Line | $2,000 | $10,000 | $50,000 |
+|---|---|---|---|
+| `EU_STK_XETRA` | 14.05 bps | **10.61** | 10.45 |
+| `EU_STK_LSE` | 17.60 bps | **13.25** | 12.45 |
+| `EU_STK_SIX` | 23.31 bps | **16.02** | 16.02 |
+
+Three corrections landed with the close, all of them things the measurement
+found and none of them visible without it:
+
+1. **Commission is the routing-weighted charge, not the schedule minimum.**
+   `min_per_order` in `broker_ibkr.json` is now what IBKR actually billed across
+   the venues SMART reaches — XETRA 1.25→1.2636, LSE 1.00→1.0343, **SIX
+   1.50→1.9291**, because `EBS` charges CHF 3.58 (2.39×) on 7 of 7 fills with
+   zero variance while `EUDARK`/`TRWBCH` charge 1.50 and take 76% of the flow.
+   Marcel's per-edit authorisation, recorded in the file; **not a precedent**.
+   ⚑ Valid only where the minimum binds — at one share nothing can say whether a
+   venue's excess is flat or a rate.
+2. **Swiss stamp duty is no longer charged.** `tax_rules.json` has carried
+   `broker_swiss_only: true` since it was written and `_transaction_tax` never
+   read it, so the duty was billed to everyone: 30 of the 42 bps a Swiss
+   round-trip returned, ~71% of the quote. The account trades through IB UK
+   (E-9). `EU_STK_SIX` went **46.02 → 16.02 bps**. ⚑ A *Swiss* broker still
+   pays, and the UI owes CH customers that sentence — the model is silent for
+   them now, and silence reads as "no such cost".
+3. **The price is quoted against `MKT_RAW`**, the leg the shipped executor
+   actually reaches. `LMT_MID` priced all three lines at 0.00 bps because a
+   mid-limit only fills when it gets the mid.
+
+⚑ **Not published.** E-10 declined 2026-08-12 — "no need so far". The evidence
+exists; publishing simply is not wanted, so `tool/src/02-data.js` still lacks the
+fourth cell state it would need and that is correct.
+
 #### Why it stopped being about venues
 
 The original design routed to an explicit venue — `IBIS2` / `LSEETF` / `EBS`,
