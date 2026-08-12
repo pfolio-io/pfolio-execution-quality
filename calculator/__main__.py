@@ -35,7 +35,15 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--qty", type=float, required=True)
     p.add_argument("--price", type=float, required=True)
     p.add_argument("--multiplier", type=float, default=1.0)
-    p.add_argument("--strategy", default="LMT_MID")
+    p.add_argument(
+        "--strategy", required=True,
+        choices=("MIDPRICE_NATIVE", "LMT_MID", "MKT_ADAPTIVE", "MKT_RAW"),
+        help="Order type to price slippage against. REQUIRED — there is no "
+             "default, because the previous default (LMT_MID) priced every "
+             "call against the order type that mostly does not execute and "
+             "returned 0.00 bps for all three European buckets. The shipped "
+             "policy reaches MKT_RAW.",
+    )
     p.add_argument("--base-currency", default="USD")
     p.add_argument(
         "--contract-currency", default=None,

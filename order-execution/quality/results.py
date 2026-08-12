@@ -22,6 +22,18 @@ COLUMNS: list[str] = [
     "run_id", "trial_idx", "timestamp_utc",
     # contract
     "symbol", "secType", "exchange", "currency", "conId", "expiry", "multiplier",
+    # `sec_id` — the ISIN, when the contract was resolved by ISIN (the European
+    # cells). Null for every US cell, which resolves by ticker. Added 2026-08-10:
+    # a UCITS ETF trades under a different local ticker on every venue, so
+    # `symbol` alone cannot say which fund a published European figure measured.
+    # Additive and nullable, so no SCHEMA_VERSION bump — parquet append uses
+    # promote=True and older rows read back as null.
+    "sec_id",
+    # `price_magnifier` — quoted units per unit of currency. 100 on pence-quoted
+    # London lines, 1 everywhere else, read from ContractDetails.priceMagnifier.
+    # Added 2026-08-11: without it a GBP commission was divided by a GBX notional
+    # and every commission_bps for those lines was 100x too small.
+    "price_magnifier",
     # strategy
     "strategy_label", "eligible", "skip_reason",
     # request
@@ -38,6 +50,14 @@ COLUMNS: list[str] = [
     "paper_account", "session", "ib_server_version",
     # commission (raw IB commissionReport data; analyze.py normalizes to bps)
     "commission", "commission_currency", "exec_ids",
+    # `exec_exchange` — where the fills ACTUALLY executed, from
+    # `execution.exchange`, not the exchange that was requested. Added
+    # 2026-08-11 after a measured surprise: a SMART-routed order in a
+    # Xetra-primary ETF executed on GETTEX2, so attributing by the requested
+    # exchange would have published a Gettex fill as XETRA and priced it against
+    # XETRA's commission rule. Direct routing keeps the two equal; this column
+    # is what proves it, and the only field that would catch a silent re-route.
+    "exec_exchange",
     # realized P&L from commissionReport.realizedPNL on closing fills,
     # in commission_currency. NOTE: IB computes this against the
     # *account's* position average cost basis at fill time—NOT against
@@ -87,22 +107,51 @@ def append_row(row: dict[str, Any], mode: str = "paper") -> Path:
 
 
 def _append_parquet(path: Path, row: dict[str, Any]) -> None:
+    """Append one row, tolerating a store whose column TYPES differ from ours.
+
+    ⚑ **This has already cost a live fill.** On 2026-08-11 a maintenance script
+    rewrote the stores through `pandas.to_parquet`, which encodes strings as
+    `large_string` and an all-integer column as `double`. `Table.from_pylist`
+    produces `string` and `int64`. `promote_options="default"` refuses both
+    pairings, so `append_row` raised **after the order had filled** — the trial
+    was lost, and because the exception unwound past the auto-flatten the run
+    left an open position on a live account.
+
+    The lesson is not "do not use pandas": it is that the append path must
+    survive a store written by anything other than itself, because sooner or
+    later one will be. `promote_options="permissive"` unifies string widths and
+    int/float widths; the stricter mode is kept as the first attempt so ordinary
+    schema growth still goes through the narrow path.
+    """
     import pyarrow as pa
     import pyarrow.parquet as pq
 
     new_table = pa.Table.from_pylist([row])
     if path.exists():
         existing = pq.read_table(path)
-        # Tolerate schema growth: missing columns on either side become null.
-        try:
-            combined = pa.concat_tables(
-                [existing, new_table], promote_options="default"
-            )
-        except TypeError:
-            combined = pa.concat_tables([existing, new_table], promote=True)
+        combined = _concat_tolerantly(pa, existing, new_table)
     else:
         combined = new_table
     pq.write_table(combined, path)
+
+
+def _concat_tolerantly(pa, existing, new_table):
+    """`default` promotion first, then `permissive`, then the pre-14.0 kwarg.
+
+    ⚑ `pa.lib.ArrowTypeError` **subclasses `TypeError`**, so the except clauses
+    have to be ordered narrowest-first or the Arrow error is swallowed by the
+    handler meant for the old-pyarrow signature — which is exactly the bug that
+    ate the first attempt at this fix.
+    """
+    last: Exception | None = None
+    for options in ("default", "permissive"):
+        try:
+            return pa.concat_tables([existing, new_table], promote_options=options)
+        except pa.lib.ArrowTypeError as exc:      # narrower than TypeError
+            last = exc
+        except TypeError:                          # pyarrow < 14: no such kwarg
+            return pa.concat_tables([existing, new_table], promote=True)
+    raise last
 
 
 def _append_csv(path: Path, row: dict[str, Any]) -> None:

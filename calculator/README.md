@@ -86,11 +86,21 @@ python -m calculator --asset-class EU_STK_LSE --side BOTH \
 from calculator import compute_cost, CostInput
 b = compute_cost(CostInput(
     symbol="AAPL", asset_class="US_STK", side="BOTH",
-    qty=100, price=180, base_currency="USD",
+    qty=100, price=180, strategy="MKT_RAW", base_currency="USD",
 ))
 print(b.total_bps)        # 2.68
 print(b.render())         # full breakdown table
 ```
+
+⚑ **`strategy` is required and has no default** *(2026-08-12)*. It defaulted to
+`LMT_MID`, which priced every caller against the order type that mostly does not
+execute — it fills 12% of attempts on `EU_STK_SIX` and 62% on `EU_STK_LSE`. A
+mid-limit only fills *when it gets the mid*, so its measured slippage is ~0 by
+construction, and all three European buckets returned **0.00 bps of slippage from
+a real measurement** — reproducing, from good data, the exact reading the European
+harness existed to eliminate. The shipped policy reaches **`MKT_RAW`**. A default
+here was not a convenience but an unattributed assumption about execution, which
+S1-33 does not permit.
 
 ## CLI flags
 
@@ -101,7 +111,7 @@ print(b.render())         # full breakdown table
 | `--price`             | yes      | Reference price (mid or last)                            |
 | `--side`              | no       | `BUY` / `SELL` / `BOTH` (default `BOTH`)                 |
 | `--multiplier`        | no       | Contract multiplier (default 1)                          |
-| `--strategy`          | no       | Reserved for slippage lookup (default `LMT_MID`)         |
+| `--strategy`          | **yes**  | Order type slippage is priced against. **No default** — see below |
 | `--base-currency`     | no       | Output currency (default `USD`)                          |
 | `--contract-currency` | no       | Notional denomination (default = broker rule's currency) |
 | `--jurisdiction`      | no       | ISO-2 code override for tax lookup                       |

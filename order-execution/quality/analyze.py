@@ -10,7 +10,9 @@ Run from `order-execution/`:
     python -m quality.analyze --run-id 20260504T133000Z-abc # one specific run (prefix ok)
     python -m quality.analyze --since 2026-05-04T13:30      # ISO UTC cutoff
     python -m quality.analyze --mode live \\
-        --export-matrix-csv results/matrix_live.csv          # bucket × strategy CSV
+        --export-matrix-csv quality/results/matrix_live.csv   # bucket × strategy CSV
+                                                             # (CWD-relative, and
+                                                             #  CWD is order-execution/)
 """
 
 from __future__ import annotations
@@ -179,12 +181,92 @@ def bucket_strategy_matrix(df: pd.DataFrame) -> pd.DataFrame:
     wide_med = grouped.pivot(index="bucket", columns="strategy_label", values="median_bps").round(4)
     wide_n = grouped.pivot(index="bucket", columns="strategy_label", values="n").fillna(0).astype(int)
 
+    # ⚑ `_n` counts BOTH legs; `_entry_n` counts entry legs only, and the two
+    # disagree by ~3.5x on MKT_RAW in every bucket.
+    #
+    # Auto-flatten exits are always MKT_RAW, so only that strategy accumulates
+    # exit legs — every other strategy's `_n` is already entry-only. A reader
+    # comparing "MKT_RAW n=28" against "LMT_MID n=8" therefore reads a 3.5x
+    # confidence difference that is an artifact of the test fixture, not of
+    # sampling. An exit leg is a real market-order execution, but it is not an
+    # independent sample of *choosing* MKT_RAW: its side is fixed by whatever
+    # entry preceded it and it fires seconds later. `cost_model.py` already
+    # excludes them for exactly this reason ("a harness test-fixture choice, not
+    # a user pattern") and counts entry legs only — so the calculator and this
+    # matrix have been reporting different n for the same store.
+    #
+    # Published values are deliberately NOT changed here. Switching `_n` and
+    # `_median_bps` to the entry-only basis moves US_STK's MKT_RAW median from
+    # -0.264 to +0.527 — a SIGN FLIP on an already-published figure, from price
+    # improvement to cost — and US_ETF by 0.233. That is a call about a public
+    # number, not a reconciliation, so it is surfaced rather than taken.
+    # `leg` may be absent entirely: the schema is forward-compatible (parquet
+    # append uses promote=True) and pre-auto-flatten stores predate the column.
+    leg = (fills["leg"] if "leg" in fills.columns
+           else pd.Series(pd.NA, index=fills.index, dtype="object"))
+    entry_only = fills[leg.isna() | (leg == "entry")]
+    entry_n = (
+        entry_only.groupby(["bucket", "strategy_label"])[PRIMARY_METRIC].count()
+        .unstack(fill_value=0)
+        .reindex(index=wide_n.index, columns=wide_n.columns, fill_value=0)
+        .fillna(0).astype(int)
+    )
+
     # Interleave median + n columns per strategy for easier reading.
     out = pd.DataFrame(index=wide_med.index)
     for strat in sorted(wide_med.columns):
         out[f"{strat}_median_bps"] = wide_med[strat]
         out[f"{strat}_n"] = wide_n[strat]
-    return out.reset_index()
+        out[f"{strat}_entry_n"] = entry_n[strat]
+
+    divergent = sorted({
+        strat for strat in wide_med.columns
+        if (wide_n[strat] != entry_n[strat]).any()
+    })
+    if divergent:
+        print(f"[matrix] ⚑ `_n` includes auto-flatten exit legs and `_entry_n` "
+              f"does not; they differ for: {divergent}. The calculator uses the "
+              f"entry-only basis.")
+
+    return _with_unmeasured_rows(out, absent).reset_index()
+
+
+def _with_unmeasured_rows(out: pd.DataFrame, absent: list[str]) -> pd.DataFrame:
+    """Add one explicit all-zero-n row per declared-but-unmeasured bucket.
+
+    **Why a row and not an omission.** `cost_model.py` floors slippage at zero,
+    so a US bucket can publish `0.00 bps` from a *measured* negative — fills at
+    or inside the mid, capped so the total is not a promise of price improvement
+    — while an unmeasured bucket would publish the same `0.00` from nothing at
+    all. The two totals look identical and mean opposite things, and only one of
+    them can move: an unmeasured figure can only go **up**.
+
+    The Python calculator already distinguishes them (`measurement_state`,
+    `unmeasured=True`, `PARTIAL TOTAL`). The matrix CSV did not: an unmeasured
+    bucket was simply an **absent row**, and absence reads as *not applicable*
+    rather than *never measured*. A blank median beside `n = 0` cannot be read as
+    zero cost, and it puts the answer in the file instead of in whoever remembers.
+
+    Downstream-neutral by construction: every consumer already treats `n = 0` as
+    no data (`tool/src/02-data.js::bestGuess` returns null below its thresholds),
+    so this changes what a reader sees and no number anywhere.
+    """
+    if not absent:
+        return out
+    n_cols = [c for c in out.columns if c.endswith("_n")]
+    med_cols = [c for c in out.columns if c.endswith("_median_bps")]
+    # NaN rather than pd.NA: it keeps the median columns float, so they still
+    # render through `--export-matrix-csv`'s `%.4f` and read back as numbers.
+    blank = pd.DataFrame(
+        [{**{c: float("nan") for c in med_cols}, **{c: 0 for c in n_cols}}
+         for _ in absent],
+        index=pd.Index(sorted(absent), name=out.index.name),
+    )
+    combined = pd.concat([out, blank]).sort_index()
+    # `concat` with NA promotes the counts to float; they are counts.
+    for col in n_cols:
+        combined[col] = combined[col].fillna(0).astype(int)
+    return combined
 
 
 def coverage_table(df: pd.DataFrame) -> pd.DataFrame:
@@ -263,9 +345,26 @@ def _multiplier_int(m: Any) -> float:
         return 1.0
 
 
+def _price_magnifier(row: pd.Series) -> float:
+    """Quoted units per unit of currency; 1 when absent or unusable.
+
+    ⚑ **100 on pence-quoted London lines.** IBKR reports `currency = GBP` and
+    then quotes in GBX, so `CSP1` arrives as 61917 meaning GBP 619.17. Dividing a
+    GBP commission by that notional gives a figure 100× too small — measured
+    2026-08-11 on the first live GBP fill: 0.2 bps reported where the truth is
+    ~16. Rows written before the column existed default to 1, which is right for
+    every instrument traded until then."""
+    try:
+        value = float(row.get("price_magnifier") or 1)
+    except (TypeError, ValueError):
+        return 1.0
+    return value if value > 0 else 1.0
+
+
 def _commission_bps_row(row: pd.Series, rates: dict[str, float]) -> float:
-    """Commission as bps of notional. Notional = qty × price × multiplier
-    (multiplier defaults to 1 for non-derivatives). When commission_currency
+    """Commission as bps of notional. Notional = qty × price × multiplier ÷
+    price_magnifier (multiplier defaults to 1 for non-derivatives, magnifier to
+    1 outside the pence-quoted London lines). When commission_currency
     differs from contract.currency, both are converted to USD via the FX
     table—bps is dimensionless so any common pivot works. Returns NaN
     when commission is missing, qty/price are non-positive, or any
@@ -279,7 +378,8 @@ def _commission_bps_row(row: pd.Series, rates: dict[str, float]) -> float:
         return float("nan")
     comm_ccy = row.get("commission_currency") or ""
     contract_ccy = row.get("currency") or ""
-    notional = qty * price * _multiplier_int(row.get("multiplier"))
+    notional = (qty * price * _multiplier_int(row.get("multiplier"))
+                / _price_magnifier(row))
     if not comm_ccy or not contract_ccy:
         return float("nan")
     if comm_ccy == contract_ccy:
@@ -430,7 +530,9 @@ def main() -> None:
     p.add_argument(
         "--export-matrix-csv", type=Path, default=None,
         help="Write asset-class-bucket × strategy median-bps matrix as CSV "
-             "to this path. Skips the REPORT.md rendering when set.",
+             "to this path, IN ADDITION to rendering REPORT.md. The path is "
+             "resolved against the CWD, not against results/ — from "
+             "order-execution/ that means quality/results/matrix_live.csv.",
     )
     args = p.parse_args()
 
@@ -449,13 +551,19 @@ def main() -> None:
         matrix = bucket_strategy_matrix(sliced)
         if matrix.empty:
             print("[matrix] no rows to export—empty filter or no fills")
-            return
-        args.export_matrix_csv.parent.mkdir(parents=True, exist_ok=True)
-        matrix.to_csv(args.export_matrix_csv, index=False, float_format="%.4f")
-        print(f"\nwrote matrix CSV → {args.export_matrix_csv}")
-        print(matrix.to_string(index=False))
-        return
+        else:
+            args.export_matrix_csv.parent.mkdir(parents=True, exist_ok=True)
+            matrix.to_csv(args.export_matrix_csv, index=False,
+                          float_format="%.4f")
+            print(f"\nwrote matrix CSV → {args.export_matrix_csv}")
+            print(matrix.to_string(index=False))
 
+    # The matrix export used to `return` here, so `--export-matrix-csv` silently
+    # suppressed the report. Every European batch passed that flag, so REPORT.md
+    # went unregenerated from before the first European measurement until
+    # 2026-08-12 — four batches during which the documented "regenerate the
+    # report after running" step ran and did nothing. The two outputs are not
+    # alternatives; asking for one is not a reason to skip the other.
     report = render_report(sliced, args.mode, slice_label=slice_label)
     out_path = args.report_path or (RESULTS_DIR / "REPORT.md")
     out_path.write_text(report)

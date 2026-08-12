@@ -149,8 +149,14 @@ def test_the_shared_instrument_key_is_the_one_both_consumers_use():
 # --------------------------------------------------------------------------- #
 
 def test_a_declared_but_untraded_class_reports_unmeasured_not_missing():
-    assert harness_data.is_declared("EU_STK_LSE")
-    assert harness_data.measurement_state("EU_STK_LSE", mode="live") == "unmeasured"
+    """⚑ `EU_STK_LSE` was the standing example twice over — until it started
+    measuring in paper on 2026-08-11 morning, and in **live** the same afternoon.
+    Both times this test failed, and both times the failure was the point. It now
+    picks a class that is genuinely unmeasured rather than naming one, so it keeps
+    asserting the behaviour as the European buckets fill up."""
+    unmeasured = _an_unmeasured_class(mode="live")
+    assert harness_data.is_declared(unmeasured)
+    assert harness_data.measurement_state(unmeasured, mode="live") == "unmeasured"
     assert harness_data.measurement_state("NOT_A_CLASS") == "undeclared"
 
 
@@ -158,6 +164,27 @@ def test_a_measured_class_reports_measured():
     if not (REPO / "order-execution" / "quality" / "results" / "trials_live.parquet").exists():
         pytest.skip("no live trial store")
     assert harness_data.measurement_state("US_STK", mode="live") == "measured"
+
+
+def _an_unmeasured_class(mode: str = "paper") -> str:
+    """A declared class the store has no usable measurement for.
+
+    ⚑ Was hardcoded to `EU_STK_LSE` until 2026-08-11, when that bucket started
+    carrying fills — which is the outcome this whole exercise was for, and it
+    broke the test. Selecting one instead of naming one keeps the assertion
+    about the *behaviour* (an unmeasured class must be flagged, not silently
+    zeroed) rather than about which class happens to be empty this week."""
+    import pandas as pd
+    store = (REPO / "order-execution" / "quality" / "results"
+             / f"trials_{mode}.parquet")
+    if not store.exists():
+        pytest.skip(f"no {mode} trial store")
+    df = pd.read_parquet(store)
+    fills = df[(df["status"] == "FILLED") & df["slip_vs_mid_t0_bps"].notna()]
+    absent = buckets.unmeasured_classes(fills)
+    if not absent:
+        pytest.skip("every declared class is measured — nothing left to assert on")
+    return sorted(absent)[0]
 
 
 def test_an_unmeasured_european_total_is_flagged_incomplete():
@@ -169,7 +196,8 @@ def test_an_unmeasured_european_total_is_flagged_incomplete():
     inadmissible, and a zero arriving by omission is an assumed spread.
     """
     out = cost_model.compute_cost(cost_model.CostInput(
-        symbol="X", asset_class="EU_STK_LSE", side="BOTH", qty=1000, price=7,
+        symbol="X", asset_class=_an_unmeasured_class(), side="BOTH",
+        qty=1000, price=7, strategy="LMT_MID",
     ))
     assert not out.is_complete
     assert out.unmeasured_components, "no component was flagged"
@@ -183,6 +211,7 @@ def test_a_measured_total_is_not_flagged_and_its_arithmetic_is_untouched():
     zero contribute the same 0; only one of them is a value."""
     out = cost_model.compute_cost(cost_model.CostInput(
         symbol="AAPL", asset_class="US_STK", side="BOTH", qty=100, price=200,
+        strategy="LMT_MID",
     ))
     assert out.is_complete
     assert "TOTAL" in out.render() and "PARTIAL TOTAL" not in out.render()
@@ -193,10 +222,102 @@ def test_a_measured_zero_and_an_unmeasured_zero_are_distinguishable():
     """They were not, before. Same number, same column, same total — the only
     difference was a `source` string, and no total reads a string."""
     eu = cost_model.compute_cost(cost_model.CostInput(
-        symbol="X", asset_class="EU_STK_LSE", side="BUY", qty=1000, price=7))
+        symbol="X", asset_class=_an_unmeasured_class(), side="BUY",
+        qty=1000, price=7, strategy="LMT_MID"))
     us = cost_model.compute_cost(cost_model.CostInput(
-        symbol="AAPL", asset_class="US_STK", side="BUY", qty=100, price=200))
+        symbol="AAPL", asset_class="US_STK", side="BUY", qty=100, price=200,
+        strategy="LMT_MID"))
     eu_slip = [line for line in eu.lines if line.label.startswith("slippage")][0]
     us_slip = [line for line in us.lines if line.label.startswith("slippage")][0]
     assert eu_slip.bps_of_notional == us_slip.bps_of_notional == 0.0
     assert eu_slip.unmeasured and not us_slip.unmeasured
+
+
+def test_strategy_has_no_default_so_nobody_prices_against_the_wrong_order_type():
+    """`CostInput.strategy` defaulted to LMT_MID until 2026-08-12, and that
+    default priced every caller against the order type that mostly does not
+    execute — 12% of attempts on EU_STK_SIX, 62% on EU_STK_LSE. A mid-limit
+    only fills when it gets the mid, so its slippage is ~0 by construction, and
+    all three European buckets returned 0.00 bps from a *real* measurement:
+    the exact reading the European harness was built to eliminate, reproduced
+    from good data.
+
+    The regression this guards is a default quietly reappearing because it is
+    convenient at a call site. Under S1-33 an unattributed execution assumption
+    is inadmissible, and a default strategy is one.
+    """
+    import dataclasses
+    field = {f.name: f for f in dataclasses.fields(cost_model.CostInput)}["strategy"]
+    assert field.default is dataclasses.MISSING, (
+        "CostInput.strategy has a default again; callers will be priced "
+        "against an order type nobody chose"
+    )
+    assert field.default_factory is dataclasses.MISSING
+
+    with pytest.raises(TypeError):
+        cost_model.CostInput(
+            symbol="AAPL", asset_class="US_STK", side="BOTH", qty=1, price=1,
+        )
+
+
+def test_swiss_stamp_duty_is_charged_only_to_a_swiss_broker():
+    """`tax_rules.json` has carried `broker_swiss_only: true` on CH since it was
+    written, because the Umsatzabgabe is levied only when a party to the trade is
+    a Swiss securities dealer. `_transaction_tax` never read the flag, so the
+    duty was charged to everyone: 15 bps per leg, both legs, 30 of the 42 bps the
+    model returned for a Swiss round-trip — about 71% of the quote.
+
+    While the answer was unknown that was at least conservative. It stopped being
+    conservative on 2026-08-12, when the account was confirmed to trade through
+    IB UK (E-9): from then the model was simply wrong, in the expensive
+    direction, on the venue whose measurement had cost the most to obtain.
+
+    Guards both directions, because a flag that is read but always false is the
+    same bug wearing a condition.
+    """
+    def total(swiss: bool) -> float:
+        return cost_model.compute_cost(cost_model.CostInput(
+            symbol="X", asset_class="EU_STK_SIX", side="BOTH", qty=30,
+            price=173.0, strategy="MKT_RAW", broker_is_swiss=swiss,
+        ), harness_mode="live").total_bps
+
+    non_swiss, swiss = total(False), total(True)
+    assert swiss > non_swiss, "broker_swiss_only is being ignored again"
+    assert swiss - non_swiss == pytest.approx(30.0, abs=0.5), (
+        "CH duty should be 15 bps on each of two legs"
+    )
+    assert cost_model.CostInput(
+        symbol="X", asset_class="EU_STK_SIX", side="BOTH", qty=1, price=1,
+        strategy="MKT_RAW",
+    ).broker_is_swiss is False, "the safe default must be non-Swiss"
+
+
+def test_eu_commission_minimums_are_the_measured_routing_weighted_charge():
+    """`min_per_order` for the three EU buckets is no longer the published
+    schedule minimum but the routing-weighted charge measured over 137 live
+    SMART fills. The largest correction is SIX: EBS, the primary, charges
+    CHF 3.58 against a schedule 1.50 on 7 of 7 fills with zero variance.
+
+    Pinned because these are the only hand-written numbers in `broker_ibkr.json`
+    that came from measurement rather than a published schedule, and a future
+    refresh from the IBKR pricing page would quietly restore the schedule values
+    and silently under-state the Swiss line by 29%. `_min_per_order_schedule`
+    keeps the published figure beside each so the two are never confused.
+    """
+    import json
+    rules = json.loads((
+        Path(__file__).resolve().parents[1] / "order-execution" / "quality"
+        / "cost_tables" / "broker_ibkr.json"
+    ).read_text())
+
+    expected = {"EU_STK_XETRA": (1.2636, 1.25),
+                "EU_STK_LSE": (1.0343, 1.0),
+                "EU_STK_SIX": (1.9291, 1.5)}
+    for bucket, (measured, schedule) in expected.items():
+        rule = rules[bucket]
+        assert rule["min_per_order"] == pytest.approx(measured), bucket
+        assert rule["_min_per_order_schedule"] == pytest.approx(schedule), bucket
+        assert rule["min_per_order"] >= rule["_min_per_order_schedule"], (
+            f"{bucket}: measured charge below schedule minimum is not possible"
+        )
+        assert rule["_min_per_order_measured_n"] > 0, bucket
