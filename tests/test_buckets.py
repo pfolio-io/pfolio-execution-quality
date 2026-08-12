@@ -197,7 +197,7 @@ def test_an_unmeasured_european_total_is_flagged_incomplete():
     """
     out = cost_model.compute_cost(cost_model.CostInput(
         symbol="X", asset_class=_an_unmeasured_class(), side="BOTH",
-        qty=1000, price=7,
+        qty=1000, price=7, strategy="LMT_MID",
     ))
     assert not out.is_complete
     assert out.unmeasured_components, "no component was flagged"
@@ -211,6 +211,7 @@ def test_a_measured_total_is_not_flagged_and_its_arithmetic_is_untouched():
     zero contribute the same 0; only one of them is a value."""
     out = cost_model.compute_cost(cost_model.CostInput(
         symbol="AAPL", asset_class="US_STK", side="BOTH", qty=100, price=200,
+        strategy="LMT_MID",
     ))
     assert out.is_complete
     assert "TOTAL" in out.render() and "PARTIAL TOTAL" not in out.render()
@@ -222,10 +223,38 @@ def test_a_measured_zero_and_an_unmeasured_zero_are_distinguishable():
     difference was a `source` string, and no total reads a string."""
     eu = cost_model.compute_cost(cost_model.CostInput(
         symbol="X", asset_class=_an_unmeasured_class(), side="BUY",
-        qty=1000, price=7))
+        qty=1000, price=7, strategy="LMT_MID"))
     us = cost_model.compute_cost(cost_model.CostInput(
-        symbol="AAPL", asset_class="US_STK", side="BUY", qty=100, price=200))
+        symbol="AAPL", asset_class="US_STK", side="BUY", qty=100, price=200,
+        strategy="LMT_MID"))
     eu_slip = [line for line in eu.lines if line.label.startswith("slippage")][0]
     us_slip = [line for line in us.lines if line.label.startswith("slippage")][0]
     assert eu_slip.bps_of_notional == us_slip.bps_of_notional == 0.0
     assert eu_slip.unmeasured and not us_slip.unmeasured
+
+
+def test_strategy_has_no_default_so_nobody_prices_against_the_wrong_order_type():
+    """`CostInput.strategy` defaulted to LMT_MID until 2026-08-12, and that
+    default priced every caller against the order type that mostly does not
+    execute — 12% of attempts on EU_STK_SIX, 62% on EU_STK_LSE. A mid-limit
+    only fills when it gets the mid, so its slippage is ~0 by construction, and
+    all three European buckets returned 0.00 bps from a *real* measurement:
+    the exact reading the European harness was built to eliminate, reproduced
+    from good data.
+
+    The regression this guards is a default quietly reappearing because it is
+    convenient at a call site. Under S1-33 an unattributed execution assumption
+    is inadmissible, and a default strategy is one.
+    """
+    import dataclasses
+    field = {f.name: f for f in dataclasses.fields(cost_model.CostInput)}["strategy"]
+    assert field.default is dataclasses.MISSING, (
+        "CostInput.strategy has a default again; callers will be priced "
+        "against an order type nobody chose"
+    )
+    assert field.default_factory is dataclasses.MISSING
+
+    with pytest.raises(TypeError):
+        cost_model.CostInput(
+            symbol="AAPL", asset_class="US_STK", side="BOTH", qty=1, price=1,
+        )

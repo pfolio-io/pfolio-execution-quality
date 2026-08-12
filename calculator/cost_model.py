@@ -50,8 +50,21 @@ class CostInput:
     side: str  # BUY, SELL, BOTH
     qty: float
     price: float
+    # ⚑ REQUIRED, and deliberately has no default. It defaulted to "LMT_MID"
+    # until 2026-08-12, which silently priced every caller against the order
+    # type that mostly does not execute: LMT_MID fills 12% of attempts on
+    # EU_STK_SIX and 62% on EU_STK_LSE, and a mid-limit only fills WHEN IT GETS
+    # THE MID, so its measured slippage is ~0 by construction. All three
+    # European buckets therefore returned 0.00 bps of slippage from a real
+    # measurement — reproducing, from good data, exactly the reading that the
+    # European harness was built to eliminate.
+    #
+    # The shipped policy reaches MKT_RAW, not LMT_MID. Making the caller name
+    # the strategy is the smallest change that stops the wrong one being chosen
+    # by nobody. A default here is not a convenience; it is an unattributed
+    # assumption about execution, and S1-33 does not allow those.
+    strategy: str
     multiplier: float = 1.0
-    strategy: str = "LMT_MID"
     base_currency: str = "USD"
     jurisdiction: Optional[str] = None
     holding_days: int = 0
