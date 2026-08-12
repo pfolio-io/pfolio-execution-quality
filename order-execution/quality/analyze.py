@@ -10,7 +10,9 @@ Run from `order-execution/`:
     python -m quality.analyze --run-id 20260504T133000Z-abc # one specific run (prefix ok)
     python -m quality.analyze --since 2026-05-04T13:30      # ISO UTC cutoff
     python -m quality.analyze --mode live \\
-        --export-matrix-csv results/matrix_live.csv          # bucket × strategy CSV
+        --export-matrix-csv quality/results/matrix_live.csv   # bucket × strategy CSV
+                                                             # (CWD-relative, and
+                                                             #  CWD is order-execution/)
 """
 
 from __future__ import annotations
@@ -486,7 +488,9 @@ def main() -> None:
     p.add_argument(
         "--export-matrix-csv", type=Path, default=None,
         help="Write asset-class-bucket × strategy median-bps matrix as CSV "
-             "to this path. Skips the REPORT.md rendering when set.",
+             "to this path, IN ADDITION to rendering REPORT.md. The path is "
+             "resolved against the CWD, not against results/ — from "
+             "order-execution/ that means quality/results/matrix_live.csv.",
     )
     args = p.parse_args()
 
@@ -505,13 +509,19 @@ def main() -> None:
         matrix = bucket_strategy_matrix(sliced)
         if matrix.empty:
             print("[matrix] no rows to export—empty filter or no fills")
-            return
-        args.export_matrix_csv.parent.mkdir(parents=True, exist_ok=True)
-        matrix.to_csv(args.export_matrix_csv, index=False, float_format="%.4f")
-        print(f"\nwrote matrix CSV → {args.export_matrix_csv}")
-        print(matrix.to_string(index=False))
-        return
+        else:
+            args.export_matrix_csv.parent.mkdir(parents=True, exist_ok=True)
+            matrix.to_csv(args.export_matrix_csv, index=False,
+                          float_format="%.4f")
+            print(f"\nwrote matrix CSV → {args.export_matrix_csv}")
+            print(matrix.to_string(index=False))
 
+    # The matrix export used to `return` here, so `--export-matrix-csv` silently
+    # suppressed the report. Every European batch passed that flag, so REPORT.md
+    # went unregenerated from before the first European measurement until
+    # 2026-08-12 — four batches during which the documented "regenerate the
+    # report after running" step ran and did nothing. The two outputs are not
+    # alternatives; asking for one is not a reason to skip the other.
     report = render_report(sliced, args.mode, slice_label=slice_label)
     out_path = args.report_path or (RESULTS_DIR / "REPORT.md")
     out_path.write_text(report)
