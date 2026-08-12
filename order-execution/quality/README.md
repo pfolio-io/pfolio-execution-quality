@@ -83,6 +83,46 @@ The global candidates have **zero** CHF listings between them, so the only
 natively SIX-listed CHF ETFs are Swiss-domiciled trackers. The CHF cell therefore
 measures **Swiss equity** and its spread is not comparable with the other two.
 
+#### Study status — CLOSED 2026-08-12, and what "closed" does and does not mean
+
+Five batches, **29 runs · 195 trials · 137 fills · 11 venues · zero unbucketed**,
+over **two sessions** (2026-08-11 and 2026-08-12).
+
+| Bucket | `MKT_RAW` | `MKT_ADAPTIVE` | `LMT_MID` | fill rate (RAW / ADPT / LMT) |
+|---|---|---|---|---|
+| `EU_STK_XETRA` | **0.138** | −0.000 | −0.138 | 10/10 · 11/16 · 10/10 |
+| `EU_STK_LSE` | **1.053** | 0.444 | 0.000 | 10/10 · 6/16 · 5/10 |
+| `EU_STK_SIX` | **1.732** | 0.573 | −0.000 | 10/10 · 4/16 · **3/16** |
+
+Medians are bps per leg, entry legs only. **`MKT_RAW` is the number to quote** —
+it is the line the shipped executor reaches on these instruments and the only one
+that fills every time. See the `strategy` note in `../../calculator/README.md`.
+
+⚑ **CLOSED IS NOT CONVERGED.** The target is n ≥ 20 per cell across **≥ 5
+sessions**; this closes at **2 sessions**, on Marcel's call (2026-08-12), with n
+waived explicitly. Two sessions cannot distinguish a per-line property from a
+two-day condition — and batches 3 and 4 showed that distinction is real: SIX moved
+1.146 → 2.234 while XETRA sat at 0.138 throughout. **Anything published from this
+must carry the session count, not just the n.**
+
+What the study *did* establish, and would not have without trading: the venue map
+(11 venues, `EUDARK` and `TRWBEN` reachable only by trading), the per-line fill
+rates, the pence bug, the crossed-book behaviour, and `EBS` at 2.39× the modelled
+commission.
+
+⚑ **A batch left a position open, and the guard that exists did not stop it.**
+2026-08-12: `LMT_MID` BUY on `SXR8` filled at €723.30 and its auto-flatten
+`MKT_RAW` exit **timed out**, leaving 1 share long for ~18 minutes until it was
+found by auditing the store. `_report_open_positions` worked exactly as written
+and printed its warning — but it prints **per run**, and that batch was **20 runs
+fired in an unattended loop**. A correct warning on run 14 of 20, in a console
+nobody is watching, is not a control. The residue was found by pairing
+`round_trip_id` in the parquet, which is what actually caught it.
+**If you fire more than one run unattended, audit the store afterwards** — pair
+entries against exits and check net exposure per line — rather than trusting that
+someone read the output. Sizing a batch is not only counting orders; it is also
+asking who is watching when it ends.
+
 #### Why it stopped being about venues
 
 The original design routed to an explicit venue — `IBIS2` / `LSEETF` / `EBS`,
