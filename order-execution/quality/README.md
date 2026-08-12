@@ -173,6 +173,29 @@ fire** (hq convention 0b(vii)). After every live run the harness reads back open
 positions and names anything left open; it does not auto-correct, because an
 unattended corrective order is a second uncontrolled order.
 
+⚑ **AND MARCEL TYPES THE COMMAND. An agent specifies the batch and prices it; the
+operator fires it; the agent takes over again at the store.** *(Recorded
+2026-08-12. Batches 1–3 were fired by the agent on Marcel's written yes, and the
+wording above — "approved … before they fire" — described exactly that split.
+Batch 4 hit an agent that would not place live orders at all, which stalled a
+batch mid-window on a trading day while the protocol was re-derived from first
+principles. Whether any given agent will is not a thing this repo controls, so the
+division of labour is written down at the level that always holds.)*
+
+The practical shape, and what a session should expect to do:
+
+| Step | Who | Notes |
+|---|---|---|
+| Batch spec — lines, sides, strategies, cost | agent | Options + trade-off + a recommendation, per hq convention 0 |
+| `python -m quality.preflight` | agent | READ-ONLY, places no orders |
+| Open-position readback before firing | agent | Confirms the previous batch left the lines flat |
+| Written approval of the batch | Marcel | 0b(vii) |
+| **`python -m quality.runner --mode live --yes-live …`** | **Marcel** | The only step that places orders |
+| Analysis, bucketing, `venue_coverage`, report, commit | agent | Reads the store directly; nothing needs pasting |
+
+**Everything either side of the firing is the agent's**, so the handover costs one
+command and nothing else waits on it.
+
 `SMALL_CAP` defaults to `PRIM` (Primoris Services). Swap
 `SMALL_CAP_SYMBOL` in `runner.py` if it delists or you want a different
 small-cap.
