@@ -1,5 +1,5 @@
 {
-  "_doc": "USD-anchored FX rates: each value is the USD price of 1 unit of that currency. Edit when rates drift more than ~5%. analyze.py reads this file at report time; runner.py does not depend on it. Use IDEALPRO mid quotes when refreshing.",
+  "_doc": "USD-anchored FX rates: each value is the USD price of 1 unit of that currency. Edit when rates drift more than ~5%. analyze.py reads this file at report time; runner.py does not depend on it. Use IDEALPRO mid quotes when refreshing. MXN/SEK/SGD added 2026-09-03 from Riksbank fixings of 2026-05-04 (MXN/SGD via SEK crosses, Banxico cross-check 0.12%); the nine original rows are IDEALPRO mid.",
   "_as_of": "2026-05-04",
   "USD": 1.0,
   "AUD": 0.66,
@@ -9,5 +9,8 @@
   "GBP": 1.27,
   "JPY": 0.0066,
   "NZD": 0.61,
-  "HKD": 0.128
+  "HKD": 0.128,
+  "MXN": 0.0572,
+  "SEK": 0.108,
+  "SGD": 0.78
 }
