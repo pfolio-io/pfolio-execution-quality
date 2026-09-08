@@ -294,15 +294,22 @@ def test_swiss_stamp_duty_is_charged_only_to_a_swiss_broker():
 
 def test_eu_commission_minimums_are_the_measured_routing_weighted_charge():
     """`min_per_order` for the three EU buckets is no longer the published
-    schedule minimum but the routing-weighted charge measured over 137 live
-    SMART fills. The largest correction is SIX: EBS, the primary, charges
-    CHF 3.58 against a schedule 1.50 on 7 of 7 fills with zero variance.
+    schedule minimum but the routing-weighted charge measured over live SMART
+    fills. The largest correction is SIX: EBS, the primary, charges CHF 3.58
+    against a schedule 1.50 on 8 of 8 fills with zero variance.
 
     Pinned because these are the only hand-written numbers in `broker_ibkr.json`
     that came from measurement rather than a published schedule, and a future
     refresh from the IBKR pricing page would quietly restore the schedule values
-    and silently under-state the Swiss line by 29%. `_min_per_order_schedule`
-    keeps the published figure beside each so the two are never confused.
+    and silently under-state the Swiss line. `_min_per_order_schedule` keeps the
+    published figure beside each so the two are never confused.
+
+    ⚑ Re-pinned 2026-09-08 (H-4 session 3, `batches/2026-09-08-W8-record.md`):
+    137 fills over two sessions became 159 over three. XETRA reproduced within
+    EUR 0.0008; SIX moved most and on the thinnest session (n = 6, where one EBS
+    draw shifts it CHF 0.347). **If this test goes red, do not edit it to match
+    the table — find the measured run that moved the table, or the refresh that
+    should never have.**
     """
     import json
     rules = json.loads((
@@ -310,14 +317,25 @@ def test_eu_commission_minimums_are_the_measured_routing_weighted_charge():
         / "cost_tables" / "broker_ibkr.json"
     ).read_text())
 
-    expected = {"EU_STK_XETRA": (1.2636, 1.25),
-                "EU_STK_LSE": (1.0343, 1.0),
-                "EU_STK_SIX": (1.9291, 1.5)}
-    for bucket, (measured, schedule) in expected.items():
+    expected = {"EU_STK_XETRA": (1.2635, 1.25, 73),
+                "EU_STK_LSE": (1.0348, 1.0, 46),
+                "EU_STK_SIX": (1.9168, 1.5, 40)}
+    for bucket, (measured, schedule, n) in expected.items():
         rule = rules[bucket]
         assert rule["min_per_order"] == pytest.approx(measured), bucket
         assert rule["_min_per_order_schedule"] == pytest.approx(schedule), bucket
         assert rule["min_per_order"] >= rule["_min_per_order_schedule"], (
             f"{bucket}: measured charge below schedule minimum is not possible"
         )
-        assert rule["_min_per_order_measured_n"] > 0, bucket
+        assert rule["_min_per_order_measured_n"] == n, (
+            f"{bucket}: fill count moved without the value being re-pinned"
+        )
+
+    # per_value_bps on SIX stopped being a schedule read on 2026-09-08: it is
+    # measured at 5.0 over 12 fills at 23 shares (sigma 7.1e-08), on Marcel's
+    # explicit call. It is now exposed to exactly the failure above — a refresh
+    # from the pricing page restoring 6.0 would over-state every Swiss order
+    # above ~CHF 3,858 by 20%, where the rate binds over min_per_order.
+    assert rules["EU_STK_SIX"]["per_value_bps"] == pytest.approx(5.0), (
+        "EU_STK_SIX.per_value_bps is MEASURED, not the published 6.0"
+    )
