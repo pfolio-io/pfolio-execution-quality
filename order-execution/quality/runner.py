@@ -61,7 +61,12 @@ from quote_snapshot import Quote, slip_vs_mid_bps, snapshot_quote  # noqa: E402
 nest_asyncio.apply()
 
 IB_HOST = "127.0.0.1"
-IB_PORT = 7496  # TWS API port, same for paper & live accounts in this setup
+# IB Gateway is permanent on this machine (2026-09-08, Marcel's ruling):
+# 4001 live, 4002 paper. Those sockets are shared with the personal-investing
+# workspace, so the client moves, not the Gateway. The old default was TWS's
+# 7496, which served both accounts on one socket; the Gateway does not, which
+# is why the port is now keyed by mode rather than a single constant.
+IB_PORT_BY_MODE = {"paper": 4002, "live": 4001}
 IB_CLIENT_ID = 41  # distinct from production clientId 33
 
 # Per-strategy timeouts (seconds). MIDPRICE has IB's internal ~30s wait, so
@@ -883,7 +888,7 @@ async def _connect(mode: str, *, allow_live_account: bool = False) -> IB:
     cost nothing would have spent real commission, and the store it landed in is
     the one place that would not show it."""
     ib = IB()
-    await ib.connectAsync(IB_HOST, IB_PORT, clientId=IB_CLIENT_ID)
+    await ib.connectAsync(IB_HOST, IB_PORT_BY_MODE[mode], clientId=IB_CLIENT_ID)
     accounts = ib.managedAccounts()
     if not accounts:
         return ib

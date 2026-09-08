@@ -267,12 +267,21 @@ async def main() -> None:
         help="Tier name (tier1, tier2, tier3, eu, all) or comma-separated "
              "symbols. Default: the three European venues.",
     )
+    p.add_argument(
+        "--mode", choices=("paper", "live"), default="live",
+        help="Which IB Gateway socket to read from: live 4001, paper 4002. "
+             "Defaults to live because this check exists to pre-flight a live "
+             "batch; it places no orders in either mode.",
+    )
     args = p.parse_args()
     symbols = runner._expand_instruments(args.instruments)
 
     print("preflight — READ-ONLY. No orders will be placed.")
     ib = IB()
-    await ib.connectAsync(runner.IB_HOST, runner.IB_PORT, clientId=PREFLIGHT_CLIENT_ID)
+    await ib.connectAsync(
+        runner.IB_HOST, runner.IB_PORT_BY_MODE[args.mode],
+        clientId=PREFLIGHT_CLIENT_ID,
+    )
     try:
         accounts = ib.managedAccounts()
         account = accounts[0] if accounts else "(none reported)"

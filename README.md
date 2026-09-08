@@ -23,8 +23,11 @@ and the caveats you should keep in mind.
 
 ## Quick start
 
-Requires Python 3.10+ and a running TWS / IB Gateway instance for the
-harness (paper account by default, port 7496).
+Requires Python 3.10+ and a running IB Gateway instance for the harness.
+The port is keyed by `--mode`: **4001 live, 4002 paper**
+(`quality/runner.py::IB_PORT_BY_MODE`), and `--mode` defaults to paper. Those
+Gateway sockets are shared with another workspace on this machine, so the client
+is what moves if they ever need to differ.
 
 ```bash
 git clone https://github.com/pfolio-io/pfolio-execution-quality.git
