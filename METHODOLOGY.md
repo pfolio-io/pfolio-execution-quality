@@ -19,7 +19,8 @@ Total cost (bps) =
   + commission_bps            # broker commission per fill
   + reg_fees_bps              # SEC, FINRA, exchange, clearing, PTM, etc.
   + impact_bps(size)          # size-dependent slippage beyond half-spread
-  + fx_conv_bps               # if commission/notional currencies differ
+  + fx_conv_bps               # if the client's funding currency differs
+                              # from the contract's (§3 item 4)
   + carry_bps_per_day × days  # financing for shorts, CFDs, leverage
   + tax_bps                   # FTT (FR/IT), stamp duty (UK/CH), etc.
 ```
@@ -140,6 +141,14 @@ Some cost components cannot be measured per-trade and must be looked up:
    contract currency. The calculator converts at presentation time—
    harness rows stay in their native asset currency, which keeps bps
    numbers FX-invariant within a row.
+
+   The **cost** of converting is a separate line, `fx_conv_bps`. When a
+   caller names a `funding_currency` that differs from the contract
+   currency, the notional is priced as an `FX_IDEALPRO` trade: commission
+   from `broker_ibkr.json`, slippage from the harness median for the
+   named `fx_conv_strategy` — once per leg, so a round trip converts in
+   and back. `base_currency` is never read as the funding currency; it is
+   a presentation pivot. (DS-1, `batches/2026-09-14-DS1-fx-conversion-record.md`.)
 
 5. **Carry / financing**—not yet implemented. Will be a per-instrument
    benchmark + spread (e.g. CFDs at SARON + 2.5%) when shipped.

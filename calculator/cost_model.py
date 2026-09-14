@@ -12,6 +12,8 @@ V0 scope (this iteration):
 - Regulatory fees via `reg_fees.json`
 - Transaction taxes via `tax_rules.json`
 - FX conversion via `fx_rates.json`
+- The cost of converting (`fx_conv`), when the caller names a `funding_currency`
+  that differs from the contract's (DS-1)
 - Spread cost: static stub keyed by asset_class (will switch to harness
   median once we expose a programmatic accessor)
 
@@ -80,6 +82,20 @@ class CostInput:
     #: trades through IB UK, which is not a Swiss securities dealer (decision
     #: record E-9, discharged). A caller who IS with a Swiss broker sets it.
     broker_is_swiss: bool = False
+    #: The currency the client PAYS IN (DS-1). When set and different from
+    #: `contract_currency`, the notional is converted on IDEALPRO and that
+    #: conversion is charged as `fx_conv` lines; `None` charges nothing.
+    #:
+    #: ⚑ `base_currency` is deliberately NOT read as the client's currency. The
+    #: callers that exist pass `base_currency="USD"` as a pivot for CHF and EUR
+    #: listings (pfolio-app `research/allocation-study/costs.py`), so inferring a
+    #: conversion from it would charge a Swiss client buying on SIX for a USD→CHF
+    #: trade nobody makes. Only the caller knows where the money comes from.
+    #: Record: `batches/2026-09-14-DS1-fx-conversion-record.md` FX-1.
+    funding_currency: Optional[str] = None
+    #: The conversion order's strategy. REQUIRED when the conversion applies and
+    #: never defaulted — for the reason `strategy` has no default (FX-3).
+    fx_conv_strategy: Optional[str] = None
 
 
 @dataclass
@@ -532,6 +548,74 @@ def _slippage_cost(
     return lines
 
 
+FX_CONV_ASSET_CLASS = "FX_IDEALPRO"
+
+
+def _fx_conversion(
+        inp: CostInput, tables: CostTables, *, harness_mode: str = "paper",
+) -> list[CostLine]:
+    """`fx_conv_bps`: what converting the client's money into the contract's
+    currency costs (METHODOLOGY §1; DS-1).
+
+    Priced as an `FX_IDEALPRO` trade of the notional, through the calculator's
+    own paths: commission from `broker_ibkr.json` on the notional's USD value
+    (the rule is denominated in USD — its minimum is dollars), and the harness's
+    measured slippage for the named conversion strategy, capped and flagged
+    exactly as the trade's own slippage is. A BUY converts funding → contract; a
+    SELL converts the proceeds back; a round trip does both (FX-4).
+    """
+    funding, contract = inp.funding_currency, inp.contract_currency
+    if not funding or funding == contract:
+        return []
+    if not inp.fx_conv_strategy:
+        raise ValueError(
+            f"funding_currency {funding} differs from contract_currency {contract}, "
+            "so the conversion is charged — name fx_conv_strategy; it has no default"
+        )
+    if not isinstance(tables.broker.get(FX_CONV_ASSET_CLASS), dict):
+        raise ValueError(f"no {FX_CONV_ASSET_CLASS} rule in broker_ibkr.json to price the conversion")
+
+    notional_usd = _to_base(inp.qty * inp.price * inp.multiplier, contract, "USD",
+                            tables.fx_rates)
+    conv = CostInput(
+        symbol=f"{funding}.{contract}", asset_class=FX_CONV_ASSET_CLASS, side=inp.side,
+        qty=notional_usd, price=1.0, strategy=inp.fx_conv_strategy,
+        base_currency=inp.base_currency, contract_currency="USD",
+    )
+
+    def direction(leg: str) -> str:
+        return f"{contract}→{funding}" if leg in ("SELL", "exit") else f"{funding}→{contract}"
+
+    lines: list[CostLine] = []
+    comm = _commission(conv, tables)
+    if inp.side == "BOTH":
+        comm.value_base_ccy *= 2
+        comm.bps_of_notional *= 2
+        comm.label = f"fx_conv commission (×2 round-trip, {funding}⇄{contract})"
+    else:
+        comm.label = f"fx_conv commission [{direction(inp.side)}]"
+    lines.append(comm)
+
+    measured_on = _bucket_instruments(FX_CONV_ASSET_CLASS)
+    bucket_note = (f"the {FX_CONV_ASSET_CLASS} bucket's median — measured on "
+                   f"{', '.join(measured_on) or 'no instrument'} — applied to "
+                   f"{funding}.{contract}")
+    for line in _slippage_cost(conv, tables, harness_mode=harness_mode):
+        line.label = (f"fx_conv slippage [{line.side}, {direction(line.side)}, "
+                      f"{inp.fx_conv_strategy}]")
+        line.note = "; ".join(n for n in (line.note, bucket_note) if n)
+        lines.append(line)
+    return lines
+
+
+def _bucket_instruments(asset_class: str) -> list[str]:
+    """The harness instruments a bucket measures, as `asset_class_buckets.json`
+    names them — so a conversion line says which pair its median came from (FX-5)."""
+    buckets = _read_json(_DEFAULT_TABLES_DIR / "asset_class_buckets.json")
+    value = buckets.get(asset_class, [])
+    return [str(v) for v in value] if isinstance(value, list) else []
+
+
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
@@ -575,5 +659,6 @@ def compute_cost(
         breakdown.lines.append(comm)
     breakdown.lines.extend(_reg_fees(inp, tables))
     breakdown.lines.extend(_transaction_tax(inp, tables))
+    breakdown.lines.extend(_fx_conversion(inp, tables, harness_mode=harness_mode))
 
     return breakdown
