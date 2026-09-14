@@ -14,6 +14,9 @@ What's implemented:
 - ✅ Regulatory fees via `reg_fees.json` (SEC, FINRA TAF, NFA, exchange clearing, PTM)
 - ✅ Transaction taxes via `tax_rules.json` (UK stamp, FR/IT FTT, CH stamp, BE TOB)
 - ✅ FX conversion to user's `base_currency` via `fx_rates.json`
+- ✅ **The cost of converting** (`fx_conv` lines) when `funding_currency` differs
+  from the contract currency: an `FX_IDEALPRO` trade of the notional, commission
+  plus measured slippage for `fx_conv_strategy`, per leg. Off unless named (DS-1).
 - ✅ Round-trip (`side=BOTH`) sums both legs using the same policy strategy.
 - ✅ **Realized execution cost** from harness median
   (`harness_data.median_slip_bps_by_strategy`). `slip_vs_mid_t0_bps` already

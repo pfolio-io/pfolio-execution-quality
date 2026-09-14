@@ -54,6 +54,18 @@ def _parse_args() -> argparse.Namespace:
         "--jurisdiction", default=None,
         help="Override ISO-2 country code for transaction-tax lookup.",
     )
+    p.add_argument(
+        "--funding-currency", default=None,
+        help="Currency the client pays in. When it differs from the contract "
+             "currency, the IDEALPRO conversion is charged (fx_conv lines). "
+             "Not inferred from --base-currency.",
+    )
+    p.add_argument(
+        "--fx-conv-strategy", default=None,
+        choices=("MIDPRICE_NATIVE", "LMT_MID", "MKT_ADAPTIVE", "MKT_RAW"),
+        help="Order type for the conversion. Required when the conversion applies; "
+             "no default, for the reason --strategy has none.",
+    )
     p.add_argument("--holding-days", type=int, default=0)
     p.add_argument(
         "--harness-mode", choices=("paper", "live"), default="paper",
@@ -76,6 +88,8 @@ def main() -> int:
         contract_currency=args.contract_currency,
         jurisdiction=args.jurisdiction,
         holding_days=args.holding_days,
+        funding_currency=args.funding_currency,
+        fx_conv_strategy=args.fx_conv_strategy,
     )
     breakdown = compute_cost(inp, harness_mode=args.harness_mode)
     print()
