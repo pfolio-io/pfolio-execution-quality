@@ -7,3 +7,17 @@ __pycache__/
 .DS_Store
 .idea/
 .vscode/
+
+# Secrets — never committed (workspace CLAUDE.md: .env files or the OS keychain)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+service-account*.json
+*-service-account.json
+secrets.y*ml
+.tws-session
